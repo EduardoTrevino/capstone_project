@@ -91,4 +91,16 @@ body {
   body {
     @apply bg-background text-foreground;
   }
+  body {
+    @apply bg-creamSoft text-blackDark;
+  }
+}
+
+/* Tailwind v3+ “scrollbar-hide” approach or your own custom rule */
+.scrollbar-hide {
+  -ms-overflow-style: none;  /* IE and Edge */
+  scrollbar-width: none;     /* Firefox */
+}
+.scrollbar-hide::-webkit-scrollbar {
+  display: none; /* Chrome, Safari, and Opera */
 }

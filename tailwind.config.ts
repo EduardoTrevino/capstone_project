@@ -53,6 +53,26 @@ const config = {
           DEFAULT: "hsl(var(--card))",
           foreground: "hsl(var(--card-foreground))",
         },
+        // Purples
+        purpleDark: "#1F105C",
+
+        // Greens
+        greenLight: "#81B365",  // e.g. the active tab background
+        greenBase: "#82B266",   // e.g. bottom nav background & "Total" box
+        greenBright: "#B1C854", // e.g. central bottom button
+
+        // Orange / Yellow
+        orangeBright: "#FE7A15",
+        creamSoft: "#FFF8D3",
+
+        // Blue
+        blueLight: "#B1DDE2",
+
+        // Dark text shades
+        blackDark: "#222227",
+
+        // Grays
+        graySubtle: "#B3B3B3",
       },
       borderRadius: {
         lg: "var(--radius)",
