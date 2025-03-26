@@ -70,9 +70,10 @@ export default function Dashboard() {
       {/* MAIN WRAPPER */}
       <div className="flex-1 overflow-y-auto scrollbar-hide px-4 pb-20">
         <div className="max-w-5xl mx-auto pt-6">
+          <div id="revenue">
           {/* Top row: Title, Help bubble, Settings */}
-          <div className="flex items-center justify-between">
-            <h2 className="text-[#0d0d0d] text-[22px] font-semibold">
+          <div  className="flex items-center justify-between">
+            <h2  className="text-[#0d0d0d] text-[22px] font-semibold">
               Revenue &amp; Profit
             </h2>
 
@@ -95,9 +96,9 @@ export default function Dashboard() {
               </p>
             </CardContent>
           </Card>
-
+          </div>
           {/* Workforce Management */}
-          <div className="mt-8">
+          <div id="workforce" className="mt-8">
             <div className="flex items-center justify-between">
               <h2 className="text-[#0d0d0d] text-[22px] font-semibold">
                 Workforce Management
@@ -151,7 +152,7 @@ export default function Dashboard() {
           </div>
 
           {/* Customer Satisfaction */}
-          <div className="mt-8">
+          <div id="satisfaction" className="mt-8">
             <div className="flex items-center justify-between">
               <h2 className="text-[#0d0d0d] text-[22px] font-semibold">
                 Customer Satisfaction
@@ -183,9 +184,9 @@ export default function Dashboard() {
           </div>
 
           {/* Reputation & Quality of Service */}
-          <div className="mt-8 pb-8">
+          <div id="reputation" className="mt-8 pb-8">
             <div className="flex items-center justify-between">
-              <h2 className="text-[#0d0d0d] text-[22px] font-semibold">
+              <h2  className="text-[#0d0d0d] text-[22px] font-semibold">
                 Reputation &amp; Quality of Service
               </h2>
               <div className="w-[22px] h-[22px] bg-[#fff8d3] rounded-full flex items-center justify-center">
