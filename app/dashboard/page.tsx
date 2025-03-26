@@ -43,24 +43,24 @@ export default function Dashboard() {
   }
 
   // If user navigates away from 'business'
-  if (currentPage == "personal") {
-    // Example fallback screen; you can style these pages as you wish.
-    return (
-      <div className="flex min-h-screen flex-col items-center justify-center bg-[#1F105C]">
-        <Button
-          variant="outline"
-          onClick={() => setCurrentPage("business")}
-          className="absolute top-4 left-4 bg-white text-[#1F105C]"
-        >
-          <ArrowLeft className="mr-2 h-4 w-4" />
-          Back
-        </Button>
-        <div className="text-white font-bold text-lg">
-          {currentPage.toUpperCase()} PAGE
-        </div>
-      </div>
-    )
-  }
+  // if (currentPage == "personal") {
+  //   // Example fallback screen; you can style these pages as you wish.
+  //   return (
+  //     <div className="flex min-h-screen flex-col items-center justify-center bg-[#1F105C]">
+  //       <Button
+  //         variant="outline"
+  //         onClick={() => setCurrentPage("business")}
+  //         className="absolute top-4 left-4 bg-white text-[#1F105C]"
+  //       >
+  //         <ArrowLeft className="mr-2 h-4 w-4" />
+  //         Back
+  //       </Button>
+  //       <div className="text-white font-bold text-lg">
+  //         {currentPage.toUpperCase()} PAGE
+  //       </div>
+  //     </div>
+  //   )
+  // }
 
   // ---------------------------------------------------------------------------
   // Business Page Content
@@ -173,7 +173,7 @@ export default function Dashboard() {
                 {/* Image placeholder (fake chart) */}
                 <div className="relative h-[150px] w-full">
                   <Image
-                    src="/placeholder.svg?height=150&width=350"
+                    src="/chart.png"
                     alt="Customer Satisfaction Graph"
                     fill
                     style={{ objectFit: "contain" }}
@@ -231,7 +231,7 @@ export default function Dashboard() {
 
           {/* Personal Tab */}
           <button
-            onClick={() => setCurrentPage("personal")}
+            onClick={() => router.push("/dashboard/growth")}
             className="flex flex-col items-center gap-1 pt-2 text-white"
           >
             <TrendingUp className="w-5 h-5" />
