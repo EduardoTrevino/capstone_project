@@ -1,45 +1,42 @@
 import { NextRequest, NextResponse } from "next/server"
 
-// We'll define a simpler schema for the *next* chunk of the lesson:
 const nextPhaseSchema = {
-    type: "object",
-    properties: {
-      phaseName: { type: "string" },
-      messages: {
-        type: "array",
-        items: { type: "string" },
-      },
-      mcq: {
-        type: ["object", "null"],
-        properties: {
-          question: { type: "string" },
-          options: {
-            type: "array",
-            items: { type: "string" },
-          },
-          correctOptionIndex: { type: "integer" },
-        },
-        required: ["question", "options", "correctOptionIndex"],
-        additionalProperties: false,
-      },
-      feedback: {
-        type: ["object", "null"],
-        properties: {
-          correctFeedback: { type: "string" },
-          incorrectFeedback: { type: "string" },
-        },
-        required: ["correctFeedback", "incorrectFeedback"],
-        additionalProperties: false,
-      },
-      summary: {
-        type: ["string", "null"],
-      },
+  type: "object",
+  properties: {
+    phaseName: { type: "string" },
+    messages: {
+      type: "array",
+      items: { type: "string" },
     },
-    // Must list all keys in properties under required, 
-    // to satisfy "strict": true
-    required: ["phaseName", "messages", "mcq", "feedback", "summary"],
-    additionalProperties: false,
-  }
+    mcq: {
+      type: ["object", "null"],
+      properties: {
+        question: { type: "string" },
+        options: {
+          type: "array",
+          items: { type: "string" },
+        },
+        correctOptionIndex: { type: "integer" },
+      },
+      required: ["question", "options", "correctOptionIndex"],
+      additionalProperties: false,
+    },
+    feedback: {
+      type: ["object", "null"],
+      properties: {
+        correctFeedback: { type: "string" },
+        incorrectFeedback: { type: "string" },
+      },
+      required: ["correctFeedback", "incorrectFeedback"],
+      additionalProperties: false,
+    },
+    summary: {
+      type: ["string", "null"],
+    },
+  },
+  required: ["phaseName", "messages", "mcq", "feedback", "summary"],
+  additionalProperties: false,
+}
 
 export async function POST(req: NextRequest) {
   try {
@@ -48,34 +45,35 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Missing OPENAI_API_KEY" }, { status: 500 })
     }
 
-    // The client sends us the conversation so far as array of { role: string, content: string }
-    // We also expect the "latestInstruction" or something that we want to do next
     const { messages } = await req.json()
+    console.log("[/api/lesson] Received messages:", JSON.stringify(messages, null, 2))
 
-    // Build ChatCompletion
-    // We'll keep a system prompt that instructs the model:
-    const systemPrompt = `You are a friendly tutor for kids learning Drone Basics (especially "What is a Drone in Agriculture"). 
-We are conducting a multi-phase lesson. 
-Each response you give should be valid JSON abiding by this schema:
-1) "phaseName": can be "initial", "middle", "final", etc.
-2) "messages": an array of short strings showing the text that the tutor says in that phase
-3) "mcq" (only if we are in final quiz phase) with question, options[], correctOptionIndex
-4) "feedback" (only if user answered the quiz) with correctFeedback, incorrectFeedback
-5) "summary" (only if the lesson is truly complete)
-We are having a back-and-forth conversation with the user, so read all prior messages to see user input. 
-If the user is still in the "initial" knowledge check, ask them about their prior knowledge. 
-If they have answered, move on to the next phase. 
-Stop once we have the final quiz, feedback, and summary. 
-All responses must be purely JSON with no additional text outside the JSON.
-If the user has not reached the final quiz stage, set "mcq": null, "feedback": null, "summary": null.`
+    const systemPrompt = `
+You are a friendly tutor for kids learning Drone Basics ("What is a Drone in Agriculture"). 
+We have a multi-phase lesson:
+- If the user is still in initial knowledge check, ask them about prior knowledge.
+- Move on to middle content.
+- Then a final single quiz with exactly 1 correct answer => Provide feedback once user answers.
+- Then show a short "summary" to finish the lesson.
 
-    // We'll compose the messages for the chat:
+Your answer must match this JSON schema:
+1) "phaseName": "initial" | "middle" | "final" ...
+2) "messages": short text lines for this phase
+3) "mcq": { question, options[], correctOptionIndex } or null if not in final quiz
+4) "feedback": { correctFeedback, incorrectFeedback } or null if not at feedback stage
+5) "summary": string or null if not done
+
+Stop after 1 final quiz + feedback + summary. 
+Return only JSON, no extra text. 
+If quiz not reached => "mcq": null, "feedback": null, "summary": null
+`
+
     const chatMessages = [
       { role: "system", content: systemPrompt },
-      ...messages, // user + assistant messages so far
+      ...messages,
     ]
+    console.log("[/api/lesson] chatMessages to model =>", JSON.stringify(chatMessages, null, 2))
 
-    // We'll use the same "gpt-4o-2024-08-06" with structured outputs
     const payload = {
       model: "gpt-4o-2024-08-06",
       messages: chatMessages,
@@ -89,8 +87,9 @@ If the user has not reached the final quiz stage, set "mcq": null, "feedback": n
         },
       },
       temperature: 0.7,
-      max_tokens: 900,
+    //   max_tokens: 900,
     }
+    console.log("[/api/lesson] Payload =>", JSON.stringify(payload, null, 2))
 
     const response = await fetch("https://api.openai.com/v1/chat/completions", {
       method: "POST",
@@ -101,15 +100,20 @@ If the user has not reached the final quiz stage, set "mcq": null, "feedback": n
       body: JSON.stringify(payload),
     })
 
+    console.log("[/api/lesson] OpenAI responded with status:", response.status)
+
     if (!response.ok) {
       const error = await response.json()
+      console.error("[/api/lesson] OpenAI error =>", error)
       return NextResponse.json({ error }, { status: response.status })
     }
 
     const data = await response.json()
-    // The raw JSON is probably in data.choices[0].message.content
+    console.log("[/api/lesson] data =>", JSON.stringify(data, null, 2))
+
     const content = data?.choices?.[0]?.message?.content
     if (!content) {
+      console.error("[/api/lesson] No content in data.choices[0].message.")
       return NextResponse.json({ error: "No content returned from model" }, { status: 500 })
     }
 
@@ -117,12 +121,15 @@ If the user has not reached the final quiz stage, set "mcq": null, "feedback": n
     try {
       parsed = JSON.parse(content)
     } catch (err) {
+      console.error("[/api/lesson] Could not parse JSON =>", content)
       return NextResponse.json({ error: "Could not parse JSON", content }, { status: 500 })
     }
 
+    console.log("[/api/lesson] final parsed =>", JSON.stringify(parsed, null, 2))
+
     return NextResponse.json({ nextPhase: parsed })
   } catch (err: any) {
-    console.error("Error in POST /api/lessons:", err)
+    console.error("[/api/lesson] Route error =>", err)
     return NextResponse.json({ error: err.message }, { status: 500 })
   }
 }

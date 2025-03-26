@@ -4,26 +4,24 @@ import { useState, useEffect, FormEvent } from "react"
 import Image from "next/image"
 import { useRouter } from "next/navigation"
 
-// We'll define a type for our local messages:
 interface ChatMessage {
   role: "user" | "assistant";
   content: string;
 }
 
-// We'll define a type for the "phase" data from the server:
 interface LessonPhase {
   phaseName: string;
   messages: string[];
-  mcq?: {
+  mcq: {
     question: string;
     options: string[];
     correctOptionIndex: number;
-  };
-  feedback?: {
+  } | null;
+  feedback: {
     correctFeedback: string;
     incorrectFeedback: string;
-  };
-  summary?: string;
+  } | null;
+  summary: string | null;
 }
 
 export default function DroneGamePage() {
@@ -31,29 +29,22 @@ export default function DroneGamePage() {
 
   // Full conversation so far
   const [messages, setMessages] = useState<ChatMessage[]>([])
-
-  // The current "phase" from the AI
   const [phase, setPhase] = useState<LessonPhase | null>(null)
-
-  // Loading states
   const [isLoading, setIsLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
   // For MCQ
   const [selectedOption, setSelectedOption] = useState<number | null>(null)
   const [hasAnswered, setHasAnswered] = useState(false)
-  const [isQuizDone, setIsQuizDone] = useState(false)
 
   // For user input text area
   const [userInput, setUserInput] = useState("")
 
-  // On mount, we call the API once to get the "initial" phase
   useEffect(() => {
-    loadNextPhase([]) // no prior messages yet
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    // On mount, call the API once to get the "initial" phase
+    loadNextPhase([])
   }, [])
 
-  // A helper function that calls our /api/lessons route with the current conversation
   async function loadNextPhase(updatedMessages: ChatMessage[]) {
     try {
       setIsLoading(true)
@@ -66,7 +57,6 @@ export default function DroneGamePage() {
       })
 
       if (!res.ok) {
-        // If the server gave a 4xx or 5xx error, parse it
         let errData
         try {
           errData = await res.json()
@@ -83,7 +73,6 @@ export default function DroneGamePage() {
       const data = await res.json()
 
       if (data?.error) {
-        // data.error might be an object
         setError(
           typeof data.error === "string"
             ? data.error
@@ -112,7 +101,6 @@ export default function DroneGamePage() {
       setPhase(nextPhase)
       setIsLoading(false)
     } catch (err: any) {
-      // Make sure we convert err.message to a string
       const msg = typeof err.message === "string" ? err.message : JSON.stringify(err.message)
       setError(msg)
       setIsLoading(false)
@@ -124,16 +112,13 @@ export default function DroneGamePage() {
     e.preventDefault()
     if (!userInput.trim()) return
 
-    // Add user's message
     const updated = [...messages, { role: "user" as const, content: userInput }]
     setMessages(updated)
-    setUserInput("") // clear the input
-
-    // Now fetch the next phase from the model
+    setUserInput("")
     await loadNextPhase(updated)
   }
 
-  // If we have an MCQ:
+  // MCQ
   function handleSelectOption(idx: number) {
     setSelectedOption(idx)
   }
@@ -141,8 +126,6 @@ export default function DroneGamePage() {
   async function handleSubmitQuiz() {
     if (selectedOption == null || !phase?.mcq) return
 
-    // The user answered -> store that as a user message
-    // We'll do something like "I select option #2" so the model can produce feedback
     const userAnswer = `User selected option index = ${selectedOption}`
     const updated = [...messages, { role: "user" as const, content: userAnswer }]
     setMessages(updated)
@@ -152,26 +135,29 @@ export default function DroneGamePage() {
     await loadNextPhase(updated)
   }
 
-  // If we see `phase.feedback` or a `phase.summary`, that means the model
-  // gave feedback or ended the lesson. We can handle that in the UI:
-  useEffect(() => {
-    if (!phase) return
-    // If the model just returned feedback or summary, we might set isQuizDone to true, etc.
-    if (phase.summary) {
-      setIsQuizDone(true)
-    }
-  }, [phase])
+  // Here is the new function to continue after seeing feedback
+  async function handleContinueAfterFeedback() {
+    // We push a user message like "Ok, got the feedback, let's continue."
+    const updated = [
+      ...messages,
+      { role: "user" as const, content: "User saw the quiz feedback, please continue." },
+    ]
+    setMessages(updated)
+
+    // Then we call the model again
+    await loadNextPhase(updated)
+
+    // Reset quiz states if needed
+    setSelectedOption(null)
+    setHasAnswered(false)
+  }
 
   // If there's an error, show it
   if (error) {
     return (
       <div className="relative w-full min-h-screen bg-blue-50 flex items-center justify-center">
         <div className="bg-white p-4 rounded shadow">
-          <p className="text-red-600">
-            Error:
-            <br />
-            {error}
-          </p>
+          <p className="text-red-600">Error:<br />{error}</p>
           <button
             onClick={() => router.push("/dashboard")}
             className="mt-2 px-4 py-2 bg-gray-200 rounded"
@@ -183,8 +169,6 @@ export default function DroneGamePage() {
     )
   }
 
-  // Render the background and character
-  // We'll always show the background, even if loading
   return (
     <div className="relative w-full min-h-screen bg-blue-50">
       {/* Go Back */}
@@ -196,7 +180,7 @@ export default function DroneGamePage() {
       </button>
 
       {/* Background */}
-      <div className="absolute inset-0 -z-10">
+      <div className="absolute inset-0">
         <Image
           src="/game/drone-agriculture.png"
           alt="Drone farmland"
@@ -205,10 +189,9 @@ export default function DroneGamePage() {
         />
       </div>
 
-      {/* Outer container */}
+      {/* Speech bubble & character */}
       <div className="absolute bottom-0 left-0 right-0 flex justify-center items-end px-4 pb-6">
         <div className="relative flex flex-col md:flex-row items-end max-w-4xl w-full">
-          {/* Character */}
           <div className="relative w-40 h-40 md:w-48 md:h-48">
             <Image
               src="/game/Amar_transp_bg.png"
@@ -218,26 +201,22 @@ export default function DroneGamePage() {
             />
           </div>
 
-          {/* Speech bubble */}
           <div className="relative bg-white p-4 rounded-xl shadow-md ml-3 mb-14 max-w-md min-h-[120px]">
-            {/* pointer */}
             <div className="absolute -left-2 bottom-4 w-4 h-4 bg-white rotate-45" />
-
-            {/* If loading, show "..." else show the latest phase messages */}
             {isLoading ? (
               <div className="flex items-center justify-center h-full w-full">
                 <span className="animate-pulse text-2xl">...</span>
               </div>
             ) : phase ? (
               <>
-                {phase.messages.map((msg, idx) => (
+                {phase.messages.map((m, idx) => (
                   <p key={idx} className="mb-3 text-sm text-gray-700">
-                    {msg}
+                    {m}
                   </p>
                 ))}
 
-                {/* If we have an MCQ and not answered yet, show the quiz */}
-                {phase.mcq && !hasAnswered && !isQuizDone && (
+                {/* Show MCQ if not answered & not final */}
+                {phase.mcq && !hasAnswered && !phase.summary && (
                   <div className="mt-4">
                     <p className="font-semibold">{phase.mcq.question}</p>
                     <div className="flex flex-col gap-2 mt-2">
@@ -262,20 +241,47 @@ export default function DroneGamePage() {
                   </div>
                 )}
 
-                {/* If we see feedback or summary from the model, show that */}
-                {phase.feedback && (hasAnswered || isQuizDone) && (
+                {/* Show feedback if we have feedback in the phase */}
+                {phase.feedback && hasAnswered && !phase.summary && (
                   <div className="mt-3">
-                    <p className="text-green-700">
-                      Correct: {phase.feedback.correctFeedback}
-                    </p>
-                    <p className="text-red-700">
-                      Incorrect: {phase.feedback.incorrectFeedback}
-                    </p>
+                    {selectedOption === phase.mcq?.correctOptionIndex ? (
+                      <p className="text-green-700 font-medium">
+                        {phase.feedback.correctFeedback}
+                      </p>
+                    ) : (
+                      <p className="text-red-700 font-medium">
+                        {phase.feedback.incorrectFeedback}
+                      </p>
+                    )}
+
+                    {/* "Next" button if there's more to do */}
+                    <button
+                      onClick={handleContinueAfterFeedback}
+                      className="mt-3 px-3 py-1 bg-blue-200 rounded"
+                    >
+                      Continue
+                    </button>
                   </div>
                 )}
 
+                {/* If the final summary has arrived, show it */}
                 {phase.summary && (
                   <div className="mt-3">
+                    {/* If there's feedback too, show correct/incorrect logic */}
+                    {phase.feedback && (
+                      <div className="mb-2">
+                        {selectedOption === phase.mcq?.correctOptionIndex ? (
+                          <p className="text-green-700 font-medium">
+                            {phase.feedback.correctFeedback}
+                          </p>
+                        ) : (
+                          <p className="text-red-700 font-medium">
+                            {phase.feedback.incorrectFeedback}
+                          </p>
+                        )}
+                      </div>
+                    )}
+
                     <p className="font-semibold text-gray-800">{phase.summary}</p>
                     <button
                       onClick={() => router.push("/dashboard")}
@@ -287,18 +293,14 @@ export default function DroneGamePage() {
                 )}
               </>
             ) : (
-              // If there's no data or we haven't loaded
               <div className="text-sm text-gray-500">No lesson data yet.</div>
             )}
           </div>
         </div>
       </div>
 
-      {/* If we have a phase that expects user input (like the knowledge gauge),
-          show a text area + "send" button, instead of a “Continue” button. 
-          We'll guess that any phaseName except "final" might want user input. 
-          Adjust logic as needed. */}
-      {phase && !phase.mcq && !phase.summary && !isLoading && (
+      {/* If the phase expects user input & we’re not doing the MCQ or summary */}
+      {phase && !phase.summary && !phase.mcq && !isLoading && (
         <div className="absolute bottom-2 left-0 right-0 flex justify-center">
           <form
             onSubmit={handleUserSubmit}
