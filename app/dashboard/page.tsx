@@ -43,7 +43,7 @@ export default function Dashboard() {
   }
 
   // If user navigates away from 'business'
-  if (currentPage !== "business") {
+  if (currentPage == "personal") {
     // Example fallback screen; you can style these pages as you wish.
     return (
       <div className="flex min-h-screen flex-col items-center justify-center bg-[#1F105C]">
@@ -215,7 +215,7 @@ export default function Dashboard() {
           {/* Center “Game” Button (no hover animation) */}
           <div className="relative -top-8">
             <button
-              onClick={() => setCurrentPage("game")}
+              onClick={() => router.push("/dashboard/game")}
               className="
                 w-32 h-32 bg-[#d7eaac] rounded-full
                 border-8 border-white
