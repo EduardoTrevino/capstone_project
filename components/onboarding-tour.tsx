@@ -39,11 +39,11 @@ export function OnboardingTour({ onFinish }: OnboardingTourProps) {
       content:
         "Next, check Customer Satisfaction graphs. Satisfied farmers mean repeat customers and great word-of-mouth!",
     },
-    {
-      target: "#reputation",
-      content:
-        "Finally, there's Quality of Service—your business's face in the community. High reputation makes you trusted and sought after!",
-    },
+    // {
+    //   target: "#reputation",
+    //   content:
+    //     "Finally, there's Quality of Service—your business's face in the community. High reputation makes you trusted and sought after!",
+    // },
   ]
 
   // Memoize the update function to prevent recreation on each render

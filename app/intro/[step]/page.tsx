@@ -1,36 +1,45 @@
 "use client"
-
 import { useEffect, useState } from "react"
 import { useRouter } from "next/navigation"
 import Image from "next/image"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent } from "@/components/ui/card"
 import React from "react"
-
-// Define the proper type for params
+import { supabase } from "@/lib/supabase"
 type NextParams = { step: string } & { then: any } // This signals it's a Promise-like object
 
-export default function IntroPage({ params }: { params: NextParams }) {
+export default function IntroPage({ params }: { params: NextParams}) {
   const [username, setUsername] = useState("")
   const router = useRouter()
-  
-  // Now params is properly typed for React.use
   const unwrappedParams = React.use(params) as { step: string }
   const step = Number.parseInt(unwrappedParams.step)
 
   useEffect(() => {
+    // You can keep the localStorage just to know "which user"
     const storedUsername = localStorage.getItem("username")
-    if (storedUsername) {
-      setUsername(storedUsername)
-    } else {
+    if (!storedUsername) {
       router.push("/")
+    } else {
+      setUsername(storedUsername)
     }
   }, [router])
 
-  const handleNext = () => {
+  const handleNext = async () => {
     if (step < 3) {
       router.push(`/intro/${step + 1}`)
     } else {
+      // Final step -> mark orientation_done = true in DB
+      if (username) {
+        const { error } = await supabase
+          .from("users")
+          .update({ intro_done: true })
+          .eq("name", username)
+
+        if (error) {
+          console.error("Error updating orientation_done:", error.message)
+          // Optionally handle UI error
+        }
+      }
       router.push("/dashboard")
     }
   }

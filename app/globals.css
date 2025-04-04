@@ -1,6 +1,7 @@
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
+@import url('https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap');
 
 @layer base {
   :root {
@@ -47,6 +48,11 @@
     --input: 217.2 32.6% 17.5%;
     --ring: 142.4 71.8% 29.2%;
   }
+}
+
+/* Now define a utility class for that font: */
+.font-press {
+  font-family: 'Press Start 2P', cursive;
 }
 
 @layer base {
