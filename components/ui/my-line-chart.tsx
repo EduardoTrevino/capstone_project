@@ -24,7 +24,7 @@ export function MyLineChart({ data }: MyLineChartProps) {
           dataKey="week"
           tickLine={false}
           axisLine={false}
-          tick={{ fill: "#ffffff", fontSize: 12 }}
+          tick={{ fill: "#ffffff", fontSize: 12 }} // that didnt work I tried to pass props 
           // We'll label them "W1", "W2", etc.
           tickFormatter={(value) => `W${value}`}
         />

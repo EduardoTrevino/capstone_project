@@ -2,20 +2,15 @@
 import { useEffect, useState } from "react"
 import { useRouter } from "next/navigation"
 import Image from "next/image"
-import { Button } from "@/components/ui/button"
-import { Card, CardContent } from "@/components/ui/card"
 import React from "react"
 import { supabase } from "@/lib/supabase"
-type NextParams = { step: string } & { then: any } // This signals it's a Promise-like object
 
-export default function IntroPage({ params }: { params: NextParams}) {
+export default function IntroPage() {
   const [username, setUsername] = useState("")
+  const [currentIndex, setCurrentIndex] = useState(0)
   const router = useRouter()
-  const unwrappedParams = React.use(params) as { step: string }
-  const step = Number.parseInt(unwrappedParams.step)
 
   useEffect(() => {
-    // You can keep the localStorage just to know "which user"
     const storedUsername = localStorage.getItem("username")
     if (!storedUsername) {
       router.push("/")
@@ -24,11 +19,23 @@ export default function IntroPage({ params }: { params: NextParams}) {
     }
   }, [router])
 
-  const handleNext = async () => {
-    if (step < 3) {
-      router.push(`/intro/${step + 1}`)
+  // Replace these with whichever steps (messages) you prefer:
+  const steps = [
+    `Hello ${username}! I'm Rani Singh, and I'm thrilled to welcome you to our village. Word around town is that you're here to start something special—an entrepreneurial venture that will transform agriculture with drone technology!`,
+    `We have many crop fields! Many farmers here struggle to maintain efficiency and keep up with modern methods. With drones, they'll save time, reduce costs, and protect precious resources.`,
+    `Your business will revolve around leasing drones to farmers so they can book a slot, use the drones, and pay a fee. It's as simple as that! But remember—managing revenue, reputation, and customer satisfaction will be just as important as the drones themselves.`
+  ]
+
+  async function handleTapAnywhere() {
+    // Play click sound
+    const audio = new Audio("/intro/speech_click.mp3")
+    await audio.play()
+
+    // Move to the next text or finish
+    if (currentIndex < steps.length - 1) {
+      setCurrentIndex((prev) => prev + 1)
     } else {
-      // Final step -> mark orientation_done = true in DB
+      // If we just finished the last step, mark intro as done and go to dashboard
       if (username) {
         const { error } = await supabase
           .from("users")
@@ -36,70 +43,47 @@ export default function IntroPage({ params }: { params: NextParams}) {
           .eq("name", username)
 
         if (error) {
-          console.error("Error updating orientation_done:", error.message)
-          // Optionally handle UI error
+          console.error("Error updating intro_done:", error.message)
         }
       }
       router.push("/dashboard")
     }
   }
 
-  const getContent = () => {
-    switch (step) {
-      case 1:
-        return {
-          image: "/img_3.jpeg",
-          text: `Hello there! I'm Rani Singh, and I'm thrilled to welcome you to our village. Word around town is that you're here to start something special—an entrepreneurial venture that will transform agriculture with drone technology!`,
-        }
-      case 2:
-        return {
-          image: "/img_2.jpeg",
-          text: `You see these fields? Many farmers here struggle to maintain efficiency and keep up with modern methods. Drones can change all that! By leasing drones to local farms, you'll help them save time, reduce costs, and protect precious resources.`,
-        }
-      case 3:
-        return {
-          image: "/img_3.jpeg",
-          text: `Your business will revolve around leasing drones to farmers. They can book a slot, use the drones, and pay a fee. Simple as that! But remember—managing revenue, reputation, and customer satisfaction will be just as important as the drones themselves.`,
-        }
-      default:
-        return {
-          image: "/img_3.jpeg",
-          text: "Let's get started!",
-        }
-    }
-  }
-
-  const content = getContent()
-
   return (
-    <main className="flex min-h-screen flex-col items-center justify-between p-6 bg-gradient-to-b from-green-50 to-blue-50">
-      <div className="w-full max-w-md">
-        <Card className="border-0 shadow-lg overflow-hidden">
-          <div className="bg-green-600 h-2" />
-          <div className="p-4 bg-green-50">
-            <div className="flex justify-between mb-2">
-              <div className="text-sm text-green-800">Welcome, {username}</div>
-              <div className="text-sm text-green-800">Step {step}/3</div>
-            </div>
-          </div>
-          <div className="relative w-full h-[350px] bg-white">
-            <Image
-              src={content.image || "/placeholder.svg"}
-              alt="Rani Singh"
-              fill
-              style={{ objectFit: "contain" }}
-              priority
-            />
-          </div>
-          <CardContent className="p-6 bg-white">
-            <div className="text-base mb-6">{content.text}</div>
-            <Button onClick={handleNext} className="w-full bg-green-600 hover:bg-green-700">
-              {step < 3 ? "Continue" : "Start Your Business"}
-            </Button>
-          </CardContent>
-        </Card>
+    <main
+      // Entire screen is clickable
+      onClick={handleTapAnywhere}
+      className="relative w-full min-h-screen bg-cover bg-center"
+      style={{
+        backgroundImage: 'url("/intro/intro_bg.png")'
+      }}
+    >
+      {/* Rani's full-body image */}
+      <div className="absolute bottom-0 left-0 w-[250px] md:w-[300px]">
+        <Image
+          src="/intro/rani_singh_full_body.png"
+          alt="Rani Singh"
+          width={300}
+          height={600}
+          style={{ objectFit: "contain" }}
+          priority
+        />
+      </div>
+
+      {/* “Speech bubble” or “gamified” text box */}
+      <div
+        className="
+          absolute 
+          left-[150px] bottom-[110px] 
+          bg-white rounded-xl shadow-lg 
+          p-4 max-w-xs 
+          border-4
+          font-semibold
+        "
+      >
+        {steps[currentIndex]}
       </div>
     </main>
   )
 }
-
