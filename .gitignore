@@ -27,3 +27,7 @@ yarn-error.log*
 next-env.d.ts
 
 supabase_password.txt
+
+.m4a
+
+.mp3

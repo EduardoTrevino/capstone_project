@@ -22,7 +22,7 @@ export default function Home() {
   // ------------------------------------------------------
   useEffect(() => {
     //https://www.youtube.com/watch?v=xu2pESvXcmM
-    const bgmAudio = new Audio("/intro_bgm.mp3")
+    const bgmAudio = new Audio("/cobble_stone_village.mp3")
     bgmAudio.loop = true
     bgmAudio.muted = true // start muted
     bgmAudio.play().catch((err) => {
