@@ -70,7 +70,7 @@ export default function SettingsDialog({
   return (
     <Dialog open onOpenChange={(open) => { if (!open) onClose() }}>
       <DialogContent
-        className="sm:max-w-[300px]"
+        className="sm:max-w-[600px]"
         style={{
           backgroundImage: 'url("/dashboard/settings_texture.png")',
           backgroundSize: "cover",

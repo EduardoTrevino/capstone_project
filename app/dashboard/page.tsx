@@ -252,7 +252,7 @@ export default function Dashboard() {
           <button
             onClick={() => {
               setCurrentPage("personal")
-              router.push("/dashboard/growth")
+              router.push("/dashboard/goal")
             }}
             className={`flex flex-col items-center gap-1 pt-2 hover:scale-110 transition-transform ${
               currentPage === "personal" ? "text-[#1f105c]" : "text-white"
