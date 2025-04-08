@@ -39,13 +39,24 @@ export default function DroneGamePage() {
 
   // For user input text area
   const [userInput, setUserInput] = useState("")
+  
+  // NEW: Store userId from localStorage
+  const [userId, setUserId] = useState<string>("")
 
+  // 1) On mount, grab userId from localStorage and load the initial phase
   useEffect(() => {
-    // On mount, call the API once to get the "initial" phase
-    loadNextPhase([])
-  }, [])
+    const storedUserId = localStorage.getItem("userId")
+    if (!storedUserId) {
+      router.push("/")
+      return
+    }
+    setUserId(storedUserId)
+    // Once we have userId, we can load the next phase with an empty conversation
+    loadNextPhase([], storedUserId)
+  }, [router])
 
-  async function loadNextPhase(updatedMessages: ChatMessage[]) {
+  // 2) The function to call our /api/lessons endpoint
+  async function loadNextPhase(updatedMessages: ChatMessage[], userIdParam: string) {
     try {
       setIsLoading(true)
       setError(null)
@@ -53,7 +64,8 @@ export default function DroneGamePage() {
       const res = await fetch("/api/lessons", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ messages: updatedMessages }),
+        // Pass userId along with the updatedMessages
+        body: JSON.stringify({ userId: userIdParam, messages: updatedMessages }),
       })
 
       if (!res.ok) {
@@ -101,53 +113,50 @@ export default function DroneGamePage() {
       setPhase(nextPhase)
       setIsLoading(false)
     } catch (err: any) {
-      const msg = typeof err.message === "string" ? err.message : JSON.stringify(err.message)
+      const msg =
+        typeof err.message === "string" ? err.message : JSON.stringify(err.message)
       setError(msg)
       setIsLoading(false)
     }
   }
 
-  // Submit user text -> update messages -> call the API
+  // 3) Submit user text -> update messages -> call the API
   async function handleUserSubmit(e: FormEvent) {
     e.preventDefault()
-    if (!userInput.trim()) return
+    if (!userInput.trim() || !userId) return
 
     const updated = [...messages, { role: "user" as const, content: userInput }]
     setMessages(updated)
     setUserInput("")
-    await loadNextPhase(updated)
+    await loadNextPhase(updated, userId)
   }
 
-  // MCQ
+  // 4) MCQ handling
   function handleSelectOption(idx: number) {
     setSelectedOption(idx)
   }
 
   async function handleSubmitQuiz() {
-    if (selectedOption == null || !phase?.mcq) return
+    if (selectedOption == null || !phase?.mcq || !userId) return
 
     const userAnswer = `User selected option index = ${selectedOption}`
     const updated = [...messages, { role: "user" as const, content: userAnswer }]
     setMessages(updated)
     setHasAnswered(true)
 
-    // Then we ask the model for the feedback
-    await loadNextPhase(updated)
+    await loadNextPhase(updated, userId)
   }
 
-  // Here is the new function to continue after seeing feedback
+  // 5) Continue after seeing feedback
   async function handleContinueAfterFeedback() {
-    // We push a user message like "Ok, got the feedback, let's continue."
+    if (!userId) return
     const updated = [
       ...messages,
       { role: "user" as const, content: "User saw the quiz feedback, please continue." },
     ]
     setMessages(updated)
 
-    // Then we call the model again
-    await loadNextPhase(updated)
-
-    // Reset quiz states if needed
+    await loadNextPhase(updated, userId)
     setSelectedOption(null)
     setHasAnswered(false)
   }
@@ -157,7 +166,10 @@ export default function DroneGamePage() {
     return (
       <div className="relative w-full min-h-screen bg-blue-50 flex items-center justify-center">
         <div className="bg-white p-4 rounded shadow">
-          <p className="text-red-600">Error:<br />{error}</p>
+          <p className="text-red-600">
+            Error:<br />
+            {error}
+          </p>
           <button
             onClick={() => router.push("/dashboard")}
             className="mt-2 px-4 py-2 bg-gray-200 rounded"
@@ -169,6 +181,7 @@ export default function DroneGamePage() {
     )
   }
 
+  // Main rendering
   return (
     <div className="relative w-full min-h-screen bg-blue-50">
       {/* Go Back */}
