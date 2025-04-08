@@ -1,7 +1,7 @@
 "use client"
 
 import { useEffect, useState } from "react"
-import { useRouter } from "next/navigation"
+import { useRouter, usePathname } from "next/navigation"
 import Image from "next/image"
 import { OnboardingTour } from "@/components/onboarding-tour"
 import { supabase } from "@/lib/supabase"
@@ -11,9 +11,14 @@ import SettingsDialog from "@/components/SettingsDialog" // Updated import path
 
 export default function Dashboard() {
   const [username, setUsername] = useState("")
+  const [userId, setUserId] = useState<string | null>(null); 
   const [avatar, setAvatar] = useState("")
-  const [currentPage, setCurrentPage] = useState<"business" | "game" | "personal">("business")
-  const [showTour, setShowTour] = useState(false)
+  // const [currentPage, setCurrentPage] = useState<"business" | "game" | "personal">("business")
+  const [showTour, setShowTour] = useState(false);
+  const [tourStep, setTourStep] = useState(0);
+  const [isLoadingTour, setIsLoadingTour] = useState(true);
+
+
   const [showSettingsDialog, setShowSettingsDialog] = useState(false)
 
   // DB fields
@@ -22,15 +27,23 @@ export default function Dashboard() {
   const [customerSatisfaction, setCustomerSatisfaction] = useState<number>(0)
 
   const router = useRouter()
+  const pathname = usePathname();
 
   useEffect(() => {
     const storedUsername = localStorage.getItem("username")
-    if (!storedUsername) {
+    const storedUserId = localStorage.getItem("userId"); 
+    if (!storedUsername || !storedUserId) {
       router.push("/")
       return
     }
     setUsername(storedUsername)
+    setUserId(storedUserId);
     fetchTourStatus(storedUsername)
+    const savedStep = localStorage.getItem('onboardingStep');
+    if (savedStep) {
+        setTourStep(parseInt(savedStep, 10));
+        localStorage.removeItem('onboardingStep'); // Clean up item
+    }
     fetchUserData(storedUsername)
   }, [router])
 
@@ -54,6 +67,7 @@ export default function Dashboard() {
   }
 
   async function fetchTourStatus(name: string) {
+    setIsLoadingTour(true);
     const { data, error } = await supabase
       .from("users")
       .select("dashboard_tour_done")
@@ -62,24 +76,23 @@ export default function Dashboard() {
 
     if (error) {
       console.error("Error fetching dashboard_tour_done:", error.message)
+      setShowTour(false);
       return
-    }
-    if (!data) return
+    } else if (data) {
+      console.log(`Tour status for ${name}: ${data.dashboard_tour_done}`);
+      setShowTour(!data.dashboard_tour_done); // Show tour if NOT done
+   } else {
+       // Handle case where user data might not be found?
+        setShowTour(false);
+   }
+   setIsLoadingTour(false); // Finish loading
+ }
 
-    setShowTour(!data.dashboard_tour_done)
-  }
-
-  const handleFinishTour = async () => {
-    setShowTour(false)
-    const { error } = await supabase
-      .from("users")
-      .update({ dashboard_tour_done: true })
-      .eq("name", username)
-
-    if (error) {
-      console.error("Error marking tour done:", error.message)
-    }
-  }
+  const handleFinishTourCallback = () => {
+    console.log("Tour finish callback triggered in parent page.");
+    setShowTour(false); // Hide the tour component
+    // No need to update DB here, the tour component does it now.
+  };
 
   // Chart data: first week = user’s satisfaction, rest = 0
   const chartData = Array.from({ length: 7 }, (_, i) => {
@@ -123,8 +136,8 @@ export default function Dashboard() {
           <Image
             src="/dashboard/revenue_and_profit_tight.png"
             alt="Revenue & Profit"
-            width={220}
-            height={60}
+            width={170}
+            height={40}
           />
         </div>
 
@@ -209,15 +222,16 @@ export default function Dashboard() {
         </section>
       </div>
 
+      {/* ======= BOTTOM NAVIGATION BAR ======== */}
       <div className="fixed bottom-0 left-0 right-0 z-50">
         <div className="relative h-[75px] bg-[#82b266] rounded-t-[32px] flex items-center justify-around px-6">
           <button
             onClick={() => {
-              setCurrentPage("business")
-              router.push("/dashboard")
+              // setCurrentPage("business")
+              router.push("/dashboard/goal")
             }}
             className={`flex flex-col items-center gap-1 pt-2 hover:scale-110 transition-transform ${
-              currentPage === "business" ? "text-[#1f105c]" : "text-white"
+              pathname === "/dashboard/goal" ? "text-[#1f105c]" : "text-white"
             }`}
           >
             <div className="relative w-20 h-20">
@@ -233,7 +247,7 @@ export default function Dashboard() {
           <div className="relative -top-8">
             <button
               onClick={() => {
-                setCurrentPage("game")
+                // setCurrentPage("game")
                 router.push("/dashboard/game")
               }}
               className="relative w-24 h-24 bg-white rounded-full border-8 border-white flex items-center justify-center text-[#82b266] hover:scale-110 transition-transform"
@@ -251,17 +265,17 @@ export default function Dashboard() {
 
           <button
             onClick={() => {
-              setCurrentPage("personal")
-              router.push("/dashboard/goal")
+              // setCurrentPage("personal")
+              router.push("/dashboard")
             }}
             className={`flex flex-col items-center gap-1 pt-2 hover:scale-110 transition-transform ${
-              currentPage === "personal" ? "text-[#1f105c]" : "text-white"
+              pathname === "/dashboard" ? "text-[#1f105c]" : "text-white"
             }`}
           >
             <div className="relative w-20 h-20">
               <Image
                 src="/dashboard/growth_icon.png"
-                alt="Growth"
+                alt="Dashboard"
                 fill
                 style={{ objectFit: "contain" }}
               />
@@ -270,7 +284,14 @@ export default function Dashboard() {
         </div>
       </div>
 
-      {showTour && <OnboardingTour onFinish={handleFinishTour} />}
+      {!isLoadingTour && showTour && username && (
+        <OnboardingTour
+          key={pathname} // Add key based on pathname to help with state reset if needed
+          username={username}
+          onFinish={handleFinishTourCallback}
+          initialStep={tourStep} // Pass the potentially resumed step
+        />
+      )}
       {showSettingsDialog && (
         <SettingsDialog
           key={showSettingsDialog ? "open" : "closed"}  // Force remount on open

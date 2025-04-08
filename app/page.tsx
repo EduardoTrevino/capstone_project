@@ -108,14 +108,17 @@ export default function Home() {
         return
       }
       localStorage.setItem("username", newUser.name)
+      localStorage.setItem("userId", newUser.id) // Add this line
       router.push("/intro/1")
       return
     }
 
     localStorage.setItem("username", existingUser.name)
+    localStorage.setItem("userId", existingUser.id) // useful for fetching user-specific data like goals
 
     if (existingUser.intro_done) {
-      router.push("/dashboard")
+      // Redirect existing users who finished intro to the NEW home page (goals)
+      router.push("/dashboard/goal")
     } else {
       router.push("/intro/1")
     }
