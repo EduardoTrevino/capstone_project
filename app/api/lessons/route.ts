@@ -99,6 +99,7 @@ We have a multi-phase lesson:
 - Move on to middle content.
 - Then a final single quiz with exactly 1 correct answer => Provide feedback once user answers.
 - Then show a short "summary" to finish the lesson.
+Make sure you guide the user on what they should type next, because if you provide instruction they should know to send another text, so always end the instructional content with a understanding check. for example after giving the instructional content you ask them if they understand or like to dive in deeper etc.
 
 Your answer must match this JSON schema:
 1) "phaseName": "initial" | "middle" | "final" ...
