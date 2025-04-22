@@ -7,7 +7,7 @@ const scenarioStepSchema = {
   properties: {
     narrativeSteps: {
       type: "array",
-      description: "Dialogue exchanges for this step.",
+      description: "Dialogue exchanges for this step. Should contain at least one step unless it's only feedback/completion.",
       items: {
         type: "object",
         properties: {
@@ -18,7 +18,7 @@ const scenarioStepSchema = {
           },
           pfp: {
             type: "string",
-            description: "Full path to the character's profile picture (e.g., /game/characters_pfp/rani.png). Use /game/characters_pfp/narrator.png for Narrator.",
+            description: "Full path to the character's profile picture (e.g., /game/character_pfp/rani.png). Use /game/character_pfp/narrator.png for Narrator.",
           },
           text: {
             type: "string",
@@ -206,7 +206,7 @@ Scenario Characters:
 - Ali Shetty (Business Partner): pfp=/game/character_pfp/ali.png, image=/game/characters/ali.png
 - Yash Patel (Wise Villager, ethical compass): pfp=/game/character_pfp/yash.png, image=/game/characters/yash.png
 - Nisha Kapoor (Government Official, stakeholder): pfp=/game/character_pfp/nisha.png, image=/game/characters/nisha.png
-- Narrator (Sets scene, provides context): pfp=/game/character_pfp/narrator.png, image=null
+- Narrator (Sets scene, provides context): pfp=/game/character_pfp/narrator.png, image=/game/characters/narrator.png
 
 Scenario Structure:
 1. Start with an engaging narrative scene related to the goal, involving 1-2 characters. Use the Narrator if needed. Show the main character speaking using 'mainCharacterImage'.
