@@ -100,37 +100,75 @@ export default function NarrativeGamePage() {
   // Process new step data from API
   useEffect(() => {
     if (currentStepData) {
-      // Add new narrative messages to display
-      const newMessages: DisplayMessage[] = currentStepData.narrativeSteps.map(
-        (step) => ({
-          id: messageIdCounter.current++,
-          character: step.character,
-          pfp: step.pfp,
-          text: step.text,
-        })
-      );
-      setDisplayMessages((prev) => [...prev, ...newMessages]);
+      // ---> START: Added Safety Check <---
+      // Check if narrativeSteps exists and is an array before processing
+      if (Array.isArray(currentStepData.narrativeSteps)) {
+          if (currentStepData.narrativeSteps.length > 0) {
+              // Add new narrative messages to display ONLY if the array is not empty
+              const newMessages: DisplayMessage[] = currentStepData.narrativeSteps.map(
+                (step) => ({
+                  id: messageIdCounter.current++,
+                  // Add checks for step properties too, just in case AI misses something
+                  character: step?.character || "Narrator", // Default to Narrator if missing
+                  pfp: step?.pfp || "/game/characters_pfp/narrator.png", // Default PFP
+                  text: step?.text || "...", // Default text
+                  isDecision: false, // Ensure this default is set
+                })
+              );
+              setDisplayMessages((prev) => [...prev, ...newMessages]);
+          }
+          // If narrativeSteps is an empty array, we simply do nothing with it here.
+      } else {
+          // Log a warning if narrativeSteps is missing or not an array.
+          // This might indicate an issue with the API response structure.
+          console.warn("Received scenario step where narrativeSteps is missing or not an array:", currentStepData);
+          // We don't try to map it, preventing the error.
+      }
+      // ---> END: Added Safety Check <---
 
-      // Update main character image if provided
+
+      // Update main character image if provided (this can happen even without new narrative steps)
       if (currentStepData.mainCharacterImage) {
         setMainCharacterImage(currentStepData.mainCharacterImage);
+      } else if (currentStepData.mainCharacterImage === null) {
+        // If explicitly null is received, you might want to clear the image
+        // setMainCharacterImage(null); // Uncomment this if you want null to clear the image
       }
 
       // Reset selections for the new step
       setSelectedDecisionOption(null);
-      // Don't reset MCQ selection if we just submitted it and are getting feedback
-      if (!currentStepData.feedback) {
-          setSelectedMcqOption(null);
+
+      // Handle MCQ state based on feedback presence
+      if (currentStepData.feedback) {
+          // Feedback is present, meaning MCQ was just answered.
+          setHasAnsweredMcq(true);
+          // Don't reset selectedMcqOption here, we need it to show the feedback correctly.
+      } else {
+          // No feedback in this step. Reset MCQ selection if appropriate.
+          // Only reset if the scenario isn't already marked as complete.
+          if (!currentStepData.scenarioComplete) {
+             setSelectedMcqOption(null);
+             // Only reset hasAnswered if we are clearly before the feedback stage.
+             // If mcq is present now, we haven't answered it *yet*.
+             if (!currentStepData.mcq) {
+                setHasAnsweredMcq(false);
+             }
+          }
       }
 
+      // Set completion status (can happen with or without feedback, e.g., final narrative step)
       if (currentStepData.scenarioComplete) {
         setIsComplete(true);
+        // Ensure MCQ state reflects completion
+        setHasAnsweredMcq(true);
       }
 
+      // Handle potential errors passed from the backend
       if (currentStepData.error) {
           setError(currentStepData.error);
       }
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentStepData]); // Triggered when new step data arrives
 
 

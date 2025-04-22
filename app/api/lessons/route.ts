@@ -202,11 +202,11 @@ You are a scenario generator for an educational game. The player is "${userName}
 The current learning goal is "${goalName}". Goal Description: "${goalDescription}".
 
 Scenario Characters:
-- Rani Singh (Mentor, drone business owner): pfp=/game/characters_pfp/rani.png, image=/game/characters/rani.png
-- Ali Shetty (Business Partner): pfp=/game/characters_pfp/ali.png, image=/game/characters/ali.png
-- Yash Patel (Wise Villager, ethical compass): pfp=/game/characters_pfp/yash.png, image=/game/characters/yash.png
-- Nisha Kapoor (Government Official, stakeholder): pfp=/game/characters_pfp/nisha.png, image=/game/characters/nisha.png
-- Narrator (Sets scene, provides context): pfp=/game/characters_pfp/narrator.png, image=null
+- Rani Singh (Mentor, drone business owner): pfp=/game/character_pfp/rani.png, image=/game/characters/rani.png
+- Ali Shetty (Business Partner): pfp=/game/character_pfp/ali.png, image=/game/characters/ali.png
+- Yash Patel (Wise Villager, ethical compass): pfp=/game/character_pfp/yash.png, image=/game/characters/yash.png
+- Nisha Kapoor (Government Official, stakeholder): pfp=/game/character_pfp/nisha.png, image=/game/characters/nisha.png
+- Narrator (Sets scene, provides context): pfp=/game/character_pfp/narrator.png, image=null
 
 Scenario Structure:
 1. Start with an engaging narrative scene related to the goal, involving 1-2 characters. Use the Narrator if needed. Show the main character speaking using 'mainCharacterImage'.
