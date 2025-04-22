@@ -90,7 +90,7 @@ export async function POST(req: NextRequest) {
     }
 
     const goalName = goalRow.name
-
+ // MEdium (previous sim), near (in sim), far transfer
     // 5) Build a dynamic system prompt
     const systemPrompt = `
 You are a friendly tutor for a student named "${userName}", who is currently focusing on the goal "${goalName}".
