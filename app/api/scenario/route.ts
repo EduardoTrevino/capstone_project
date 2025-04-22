@@ -26,6 +26,8 @@ export async function POST(req: NextRequest) {
     const metricSnapshot: Record<string, number> = {};
     (um ?? []).forEach((r: any) => (metricSnapshot[r.metrics.name] = Number(r.value)));
 
+    
+
     /* ---------- system prompt ---------- */
     const system = {
       role: "system" as const,
