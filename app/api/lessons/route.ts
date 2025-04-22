@@ -92,44 +92,50 @@ const scenarioStepSchema = {
 // Helper to get current game state from dialogue history
 // (This is a simplified version; a more robust implementation might parse the history more deeply)
 function getCurrentGameState(history: any[]) {
-    let decisionCount = 0;
-    let mcqPresented = false;
-    let mcqAnswered = false;
-    let lastDecisionIndex: number | null = null;
-    let lastMcqAnswerIndex: number | null = null;
+  let decisionCount = 0;
+  let mcqPresented = false;
+  let mcqAnswered = false;
+  let lastDecisionIndex: number | null = null;
+  let lastMcqAnswerIndex: number | null = null;
+  let correctedDecisionCount = 0; // Track based on assistant responses
 
-    history.forEach(entry => {
-        if (entry.role === 'assistant') {
-            try {
-                const stepData = JSON.parse(entry.content);
-                if (stepData.decisionPoint) {
-                    decisionCount++;
-                }
-                if (stepData.mcq) {
-                    mcqPresented = true;
-                }
-            } catch (e) { /* ignore parse errors */ }
-        } else if (entry.role === 'user') {
-            // Very basic check for user actions based on text content
-             if (entry.content?.startsWith("I choose:")) {
-                 // Extract index if possible, otherwise just note a decision was made
-                 const match = entry.content.match(/Option index (\d+)/); // Assuming FE sends index
-                 if (match) lastDecisionIndex = parseInt(match[1], 10);
-             } else if (entry.content?.startsWith("My answer:")) {
-                 mcqAnswered = true;
-                 const match = entry.content.match(/Option index (\d+)/); // Assuming FE sends index
-                 if (match) lastMcqAnswerIndex = parseInt(match[1], 10);
-             }
-        }
-    });
+  // First pass: Count decisions presented by assistant and check for MCQ
+  history.forEach(entry => {
+      if (entry.role === 'assistant') {
+          try {
+              const stepData = JSON.parse(entry.content);
+              if (stepData.decisionPoint) {
+                  correctedDecisionCount++; // Count decisions the AI *sent*
+              }
+              if (stepData.mcq) {
+                  mcqPresented = true;
+              }
+               if (stepData.feedback) { // If feedback was given, MCQ must have been answered
+                  mcqAnswered = true;
+               }
+          } catch (e) { /* ignore parse errors */ }
+      }
+  });
 
-     // Adjust decision count based on user actions if Assistant log is unreliable
-     const userDecisions = history.filter(m => m.role === 'user' && m.content?.startsWith("I choose:")).length;
-     decisionCount = Math.max(decisionCount, userDecisions);
+  // Second pass: Correlate user actions for last indices and potentially refine mcqAnswered
+  history.forEach(entry => {
+      if (entry.role === 'user') {
+          if (entry.content?.includes("chose decision index")) { // More robust check
+               const match = entry.content.match(/index: (\d+)/);
+               if (match) lastDecisionIndex = parseInt(match[1], 10);
+               decisionCount++; // Count user *actions* separately
+          } else if (entry.content?.includes("answered MCQ index")) { // More robust check
+               mcqAnswered = true; // Mark as answered based on user action too
+               const match = entry.content.match(/index: (\d+)/);
+               if (match) lastMcqAnswerIndex = parseInt(match[1], 10);
+          }
+      }
+  });
 
-
-    return { decisionCount, mcqPresented, mcqAnswered, lastDecisionIndex, lastMcqAnswerIndex };
+  // Use the count of decisions the user actually *made* for progression logic
+  return { decisionCount, mcqPresented, mcqAnswered, lastDecisionIndex, lastMcqAnswerIndex };
 }
+
 
 
 export async function POST(req: NextRequest) {
@@ -193,8 +199,15 @@ export async function POST(req: NextRequest) {
      const dialogueHistory = userGoalsRow?.dialogue_history ?? [];
 
      // 5) Determine current game state from history
-     const gameState = getCurrentGameState(dialogueHistory);
-     console.log("[/api/lesson] Current Game State:", gameState);
+     const previousGameState = getCurrentGameState(dialogueHistory);
+     console.log("[/api/lesson] Previous Game State:", previousGameState);
+
+     // 6) Calculate the state *after* this user action (important for prompt)
+     const isMcqAnswerSubmission = previousGameState.mcqPresented && !previousGameState.mcqAnswered && decisionIndex === null; // User submitted MCQ answer
+     const currentDecisionCount = previousGameState.decisionCount + (decisionIndex !== null ? 1 : 0); // Increment if a decision was made *now*
+     const currentMcqAnswered = previousGameState.mcqAnswered || isMcqAnswerSubmission;
+
+     console.log(`[/api/lesson] Calculated current state for prompt: Decisions=${currentDecisionCount}, MCQ Answered=${currentMcqAnswered}`);
 
     // 6) Build the dynamic system prompt for the narrative scenario
     const systemPrompt = `
@@ -208,74 +221,53 @@ Scenario Characters:
 - Nisha Kapoor (Government Official, stakeholder): pfp=/game/character_pfp/nisha.png, image=/game/characters/nisha.png
 - Narrator (Sets scene, provides context): pfp=/game/character_pfp/narrator.png, image=/game/characters/narrator.png
 
-Scenario Structure:
-1. Start with an engaging narrative scene related to the goal, involving 1-2 characters. Use the Narrator if needed. Show the main character speaking using 'mainCharacterImage'.
-2. Present the user with the FIRST decision point (a question with 4 distinct options).
-3. Based on the user's choice (decisionIndex), continue the narrative, showing consequences or reactions.
-4. Present the user with the SECOND decision point.
-5. Based on the choice, continue the narrative.
-6. Present the user with the THIRD decision point.
-7. Based on the choice, continue the narrative, leading towards a conclusion.
-8. Present a final Multiple Choice Question (MCQ) testing the core learning from the scenario. It should have 1 correct answer.
-9. If the user has just answered the MCQ, provide feedback ('feedback' object). Check their answer (lastMcqAnswerIndex) against the correct index you defined for the MCQ.
-10. After feedback, set 'scenarioComplete' to true and provide a brief concluding narrative message (in narrativeSteps).
+Scenario Structure & State Tracking:
+1.  **Start:** Begin with narrativeSteps and the FIRST decisionPoint (decisionCount = 0 going to 1).
+2.  **Decision 1 -> 2:** User chooses (decisionIndex provided). Generate narrativeSteps reflecting choice, then the SECOND decisionPoint (decisionCount = 1 going to 2).
+3.  **Decision 2 -> 3:** User chooses. Generate narrativeSteps, then the THIRD decisionPoint (decisionCount = 2 going to 3).
+4.  **Decision 3 -> MCQ:** User chooses. Generate narrativeSteps, then the FINAL mcq (decisionCount = 3, mcqPresented = false).
+5.  **MCQ -> Feedback:** User answers MCQ (decisionIndex is null). Generate feedback and set scenarioComplete=true. Add a final concluding narrativeStep.
+6.  **Completion:** Scenario is complete.
 
-Current State:
-- Decisions made so far: ${gameState.decisionCount}
-- MCQ presented: ${gameState.mcqPresented}
-- MCQ answered: ${gameState.mcqAnswered}
+Current State (Reflects state *after* the user's latest action):
+- Decisions made so far (by user): ${currentDecisionCount}
+- MCQ presented in previous step: ${previousGameState.mcqPresented}
+- MCQ answered now (by user): ${currentMcqAnswered}
 ${decisionIndex !== null ? `- User just chose decision option index: ${decisionIndex}` : ''}
-${gameState.lastMcqAnswerIndex !== null ? `- User just answered MCQ with option index: ${gameState.lastMcqAnswerIndex}` : ''}
+${isMcqAnswerSubmission ? `- User just submitted an answer for the MCQ.` : ''}
+
+Your Task: Generate the JSON for the *next* step based on the 'Current State'.
 
 Instructions:
-- Generate the *next step* of the scenario based on the Current State.
-- If decisionCount < 3 and mcqPresented is false, the next step should likely contain a decisionPoint (unless you are mid-narrative flow).
-- If decisionCount == 3 and mcqPresented is false, the next step *must* contain the 'mcq'.
-- If mcqPresented is true and mcqAnswered is true, the next step *must* contain 'feedback' and set 'scenarioComplete' to true.
-- Use the characters naturally. Make the dialogue engaging and relevant to the goal.
-- Ensure 'pfp' and 'mainCharacterImage' paths are exactly as specified above. Use null for mainCharacterImage if the character display shouldn't change from the previous step.
-- The 'narrativeSteps' array should contain the dialogue for the *current* step only.
-- Keep narrative segments between decisions relatively concise.
-- Ensure all required fields in the JSON schema are present.
-
-Your response MUST be a single JSON object matching the provided schema. Do not include any text outside the JSON structure.
+- **Progression:**
+    - If currentDecisionCount < 3 AND previousGameState.mcqPresented == false: Generate narrativeSteps and the *next* decisionPoint.
+    - If currentDecisionCount == 3 AND previousGameState.mcqPresented == false: Generate narrativeSteps and the *mcq*.
+    - If previousGameState.mcqPresented == true AND currentMcqAnswered == true: Generate *feedback* and set scenarioComplete=true. Include a final concluding narrativeStep.
+- **Content:** Use characters naturally. Dialogue should be engaging and relevant. Keep narrative segments concise. Ensure 'pfp' and 'mainCharacterImage' paths are EXACTLY as specified. Use null for mainCharacterImage if no change.
+- **Output:** MUST be a single JSON object matching the schema. No extra text. Ensure all required fields (narrativeSteps, mainCharacterImage, decisionPoint, mcq, feedback, scenarioComplete) are present, using null where appropriate. narrativeSteps should not be empty unless it's the very final feedback/completion step where only feedback is needed.
 `.trim();
 
-    // 7) Combine system prompt and simplified history (or just the last user action)
-    // Sending full history can make the context too long/expensive. Let's rely on the state tracking.
+    // 8) Combine system prompt and history (keep it simple)
     const messagesForOpenAI = [
       { role: "system", content: systemPrompt },
-      // Optionally add the last user message if it's relevant context beyond the index
-       ...(dialogueHistory.length > 0 ? [dialogueHistory[dialogueHistory.length - 1]] : []),
+      // Give the AI the immediate context of the last thing *it* said, and the user's response
+      ...(dialogueHistory.length > 0 ? [dialogueHistory[dialogueHistory.length - 1]] : []), // Last assistant message
+       ...(decisionIndex !== null
+            ? [{ role: "user", content: `User chose decision index: ${decisionIndex}` }]
+            : isMcqAnswerSubmission
+              ? [{ role: "user", content: `User answered MCQ.` }] // Don't necessarily need the index here for the AI's next step
+              : dialogueHistory.length === 0 ? [{ role: "user", content: "Start the scenario."}] : []), // Initial or non-action step
     ];
-     // If the user just made a decision, add a simplified user message for context
-     if (decisionIndex !== null && gameState.decisionCount <= 3) {
-         messagesForOpenAI.push({ role: "user", content: `I chose decision option index ${decisionIndex}. What happens next?` });
-     }
-     // If the user just answered the MCQ
-     if (gameState.mcqPresented && gameState.lastMcqAnswerIndex !== null && !gameState.mcqAnswered) { // Check ensures we don't double-add
-        messagesForOpenAI.push({ role: "user", content: `I answered the MCQ with option index ${gameState.lastMcqAnswerIndex}. Was I correct?` });
-     }
 
 
     console.log("[/api/lesson] Messages for OpenAI =>", JSON.stringify(messagesForOpenAI, null, 2));
 
     // 8) Call OpenAI
     const payload = {
-      model: "gpt-4o-2024-08-06", // Use a capable model like GPT-4o
+      model: "gpt-4o-2024-08-06",
       messages: messagesForOpenAI,
-      response_format: {
-        type: "json_object", // Use json_object mode if schema isn't strictly required by the model version/API access level
-        // Use json_schema mode if available and preferred for strictness:
-        // type: "json_schema",
-        // json_schema: {
-        //   name: "narrative_scenario_step",
-        //   description: "A single step in the narrative scenario.",
-        //   schema: scenarioStepSchema,
-        //   strict: true, // Enforce schema compliance strictly
-        // },
-      },
-      temperature: 0.7, // Adjust for creativity vs consistency
+      response_format: { type: "json_object" },
+      temperature: 0.7,
     };
 
     console.log("[/api/lesson] OpenAI Payload =>", JSON.stringify(payload, null, 2));
@@ -321,27 +313,33 @@ Your response MUST be a single JSON object matching the provided schema. Do not 
 
     console.log("[/api/lesson] Parsed Scenario Step =>", JSON.stringify(parsedScenarioStep, null, 2));
 
+    // Basic validation of the parsed step (crucial if not using strict schema)
+    if (!parsedScenarioStep || typeof parsedScenarioStep !== 'object' || !('narrativeSteps' in parsedScenarioStep)) {
+      console.error("[/api/lesson] Invalid structure in parsed JSON:", parsedScenarioStep);
+      return NextResponse.json({ error: "Received invalid data structure from AI." }, { status: 500 });
+  }
 
-     // 10) Prepare data for Supabase logging
+     // 10) Prepare data for Supabase logging (use more descriptive user action)
      const userActionEntry = decisionIndex !== null
          ? { role: "user", content: `User chose decision index: ${decisionIndex}` }
-         : gameState.mcqPresented && gameState.lastMcqAnswerIndex !== null
-           ? { role: "user", content: `User answered MCQ index: ${gameState.lastMcqAnswerIndex}` }
-           : { role: "user", content: "User initiated scenario or continued." }; // Fallback/initial
+         : isMcqAnswerSubmission
+           ? { role: "user", content: `User answered MCQ.` } // Log simple action
+           : { role: "user", content: "User initiated scenario or continued." };
 
      const assistantEntry = { role: "assistant", content }; // Store the raw JSON string
 
-     // Only add user action if it's not already the last entry (prevents duplicates on retry/refresh)
+     // Log user action IF it's a decision or MCQ answer
      const updatedDialogue = [...dialogueHistory];
-     if (updatedDialogue.length === 0 || JSON.stringify(updatedDialogue[updatedDialogue.length - 1]) !== JSON.stringify(userActionEntry)) {
-         // Or better: check if the *specific action* (decision/MCQ answer) for this step is already logged
-         // This simple check is okay for now but could be improved
+     if (decisionIndex !== null || isMcqAnswerSubmission) {
          updatedDialogue.push(userActionEntry);
      }
-     updatedDialogue.push(assistantEntry);
+     updatedDialogue.push(assistantEntry); // Always log the assistant response
 
+    // 11) Upsert dialogue history in Supabase (update progress calculation slightly)
+    const currentProgressValue = parsedScenarioStep.scenarioComplete
+        ? 100
+        : Math.min(95, 5 + (currentDecisionCount * 25) + (previousGameState.mcqPresented ? 15 : 0) + (currentMcqAnswered ? 5 : 0));
 
-    // 11) Upsert dialogue history in Supabase
     const { error: upsertError } = await supabase
       .from("user_goals")
       .upsert(
@@ -350,10 +348,7 @@ Your response MUST be a single JSON object matching the provided schema. Do not 
           goal_id: focusedGoalId,
           dialogue_history: updatedDialogue,
           updated_at: new Date().toISOString(),
-          // Optionally update progress based on scenarioComplete flag or decision count
-           progress: parsedScenarioStep.scenarioComplete
-             ? 100
-             : Math.min(95, (gameState.decisionCount + (decisionIndex !== null ? 1: 0)) * 25 + (parsedScenarioStep.mcq ? 15 : 0) + (parsedScenarioStep.feedback ? 5: 0)), // Rough progress calculation
+          progress: currentProgressValue,
         },
         { onConflict: "user_id,goal_id" }
       );
