@@ -4,7 +4,7 @@ import { useState, useEffect, useRef, useCallback } from "react";
 import Image from "next/image";
 import { useRouter } from "next/navigation";
 
-// --- Interfaces (unchanged) ---
+// ---------- Interfaces ----------
 interface NarrativeDialogue {
   character: "Rani" | "Ali" | "Yash" | "Nisha" | "Narrator";
   pfp: string;
@@ -29,500 +29,343 @@ interface DisplayMessage {
   pfp: string | null;
   text: string;
   isDecision?: boolean;
-  isTyping?: boolean;
 }
 
-// --- Constants ---
-const NARRATIVE_STEP_DELAY_MS = 2500;
-const TYPING_INDICATOR_DELAY_MS = 500;
-const TYPING_INDICATOR = "...";
+// ---------- Timings ----------
+const MSG_DELAY_MS    = 500;   // delay before each new bubble
+const STEP_DELAY_MS   = 2200;  // pause after a bubble before next one
 
-// --- Helper Function to Map Character Name to Image Path ---
-const getCharacterImagePath = (characterName: string | null): string | null => {
-  if (!characterName) return null;
-  const basePath = '/game/characters/';
-  switch (characterName.toLowerCase()) {
-    case 'rani':      return `${basePath}rani.png`;
-    case 'ali':       return `${basePath}ali.png`;
-    case 'yash':      return `${basePath}yash.png`;
-    case 'nisha':     return `${basePath}nisha.png`;
-    case 'narrator':  return `${basePath}narrator.png`;
-    default:
-      console.warn(`Mapping not found for character image: ${characterName}`);
-      return null;
+// ---------- Helper ----------
+const getCharacterImagePath = (name: string | null): string | null => {
+  if (!name) return null;
+  const p = "/game/characters/";
+  switch (name.toLowerCase()) {
+    case "rani":     return `${p}rani.png`;
+    case "ali":      return `${p}ali.png`;
+    case "yash":     return `${p}yash.png`;
+    case "nisha":    return `${p}nisha.png`;
+    case "narrator": return `${p}narrator.png`;
+    default:         return null;
   }
 };
+
+// ===================================================================
 
 export default function NarrativeGamePage() {
   const router = useRouter();
 
-  // --- State ---
+  // ---------- State ----------
   const [currentStepData, setCurrentStepData] = useState<ScenarioStep | null>(null);
   const [staggeredMessages, setStaggeredMessages] = useState<DisplayMessage[]>([]);
   const [messageQueue, setMessageQueue] = useState<NarrativeDialogue[]>([]);
-  const [isDisplayingMessages, setIsDisplayingMessages] = useState(false);
-  const [showInteractionArea, setShowInteractionArea] = useState(false);
-  const [isInitialLoading, setIsInitialLoading] = useState(true);
-  const [mainCharacterImage, setMainCharacterImage] = useState<string | null>(null);
-  const [isLoadingApi, setIsLoadingApi] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [selectedDecisionOption, setSelectedDecisionOption] = useState<number | null>(null);
-  const [selectedMcqOption, setSelectedMcqOption] = useState<number | null>(null);
+  const [isDisplaying, setIsDisplaying]   = useState(false);
+  const [showInteraction, setShowInteraction] = useState(false);
+  const [isLoadingApi, setIsLoadingApi]   = useState(false);
+  const [mainImg, setMainImg]             = useState<string | null>(null);
+  const [error, setError]                 = useState<string | null>(null);
+
+  const [selectedDecision, setSelectedDecision] = useState<number | null>(null);
+  const [selectedMcq, setSelectedMcq] = useState<number | null>(null);
   const [hasAnsweredMcq, setHasAnsweredMcq] = useState(false);
-  const [userId, setUserId] = useState<string>("");
-  const [progress, setProgress] = useState(0);
-  const [decisionCount, setDecisionCount] = useState(0);
   const [isComplete, setIsComplete] = useState(false);
 
-  const messagesEndRef = useRef<null | HTMLDivElement>(null);
-  const messageIdCounter = useRef(0);
-  const displayTimeoutRef = useRef<NodeJS.Timeout | null>(null);
-  const textUpdateTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const [progress, setProgress] = useState(0);
+  const [decisionCount, setDecisionCount] = useState(0);
 
-  // 🔧 NEW – remember last MCQ so we can grade even after it disappears
-  const lastMcqRef = useRef<MCQ | null>(null);
+  const userIdRef   = useRef<string>("");
+  const lastMcqRef  = useRef<MCQ | null>(null);
+  const idCounter   = useRef(0);
+  const timers      = useRef<NodeJS.Timeout[]>([]);
+  const endRef      = useRef<HTMLDivElement | null>(null);
 
-  // --- Helpers ---
-  const clearDisplayTimeouts = useCallback(() => {
-    if (displayTimeoutRef.current) clearTimeout(displayTimeoutRef.current);
-    if (textUpdateTimeoutRef.current) clearTimeout(textUpdateTimeoutRef.current);
-    displayTimeoutRef.current = null;
-    textUpdateTimeoutRef.current = null;
-  }, []);
-
-  // 🔧 NEW – finish any lingering typing bubbles
-  const flushTypingIndicators = () => {
-    setStaggeredMessages(prev =>
-      prev.map(m => m.isTyping ? { ...m, isTyping: false, text: "" } : m)
-    );
+  // ---------- Utils ----------
+  const clearTimers = () => {
+    timers.current.forEach(t => clearTimeout(t));
+    timers.current = [];
   };
 
-  // --- Effects ---
-
-  // Initial load
+  // ---------- Initial load ----------
   useEffect(() => {
-    const storedUserId = localStorage.getItem("userId");
-    if (!storedUserId) { router.push("/"); return; }
-    setUserId(storedUserId);
-    setStaggeredMessages([{
-      id: messageIdCounter.current++,
-      character: "Narrator",
-      pfp: "/game/character_pfp/narrator.png",
-      text: TYPING_INDICATOR,
-      isTyping: true
-    }]);
-    loadScenarioStep(null, storedUserId);
-    return () => { clearDisplayTimeouts(); };
+    const id = localStorage.getItem("userId");
+    if (!id) { router.push("/"); return; }
+    userIdRef.current = id;
+    loadScenarioStep(null);
+    return clearTimers;
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [router]);
+  }, []);
 
-  // Handle new scenario step
+  // ---------- handle new step ----------
   useEffect(() => {
     if (!currentStepData || isLoadingApi) return;
 
-    clearDisplayTimeouts();
-    setShowInteractionArea(false);
+    setShowInteraction(false);
+    lastMcqRef.current = currentStepData.mcq ?? lastMcqRef.current;
 
-    if (isInitialLoading &&
-        Array.isArray(currentStepData.narrativeSteps) &&
-        currentStepData.narrativeSteps.length > 0) {
-      setStaggeredMessages([]);
-    }
-    setIsInitialLoading(false);
+    if (currentStepData.mainCharacterImage?.startsWith("/"))
+      setMainImg(currentStepData.mainCharacterImage);
 
-    if (currentStepData.mainCharacterImage !== undefined) {
-      if (currentStepData.mainCharacterImage &&
-          currentStepData.mainCharacterImage.startsWith("/")) {
-        setMainCharacterImage(currentStepData.mainCharacterImage);
-      }
-    }
-
-    if (currentStepData.mcq) {          // 🔧 NEW – keep reference
-      lastMcqRef.current = currentStepData.mcq;
-    }
-
-    if (Array.isArray(currentStepData.narrativeSteps) &&
-        currentStepData.narrativeSteps.length > 0) {
-      setMessageQueue([...currentStepData.narrativeSteps]);
-      setIsDisplayingMessages(true);
+    if (currentStepData.narrativeSteps?.length) {
+      setMessageQueue(currentStepData.narrativeSteps);
+      setIsDisplaying(true);
     } else {
+      // nothing to narrate – show choices/feedback directly
       setMessageQueue([]);
-      setIsDisplayingMessages(false);
-      if (currentStepData.decisionPoint || currentStepData.mcq ||
-          currentStepData.feedback || currentStepData.scenarioComplete) {
-        setShowInteractionArea(true);
-      }
+      setIsDisplaying(false);
+      setShowInteraction(true);
     }
 
-    if (currentStepData.scenarioComplete) setIsComplete(true);
+    setIsComplete(currentStepData.scenarioComplete);
     if (currentStepData.feedback) setHasAnsweredMcq(true);
-    if (currentStepData.error) setError(currentStepData.error);
-  }, [currentStepData, isLoadingApi, clearDisplayTimeouts]);
+  }, [currentStepData, isLoadingApi]);
 
-  // Process message queue (unchanged except for comments)
+  // ---------- sequentially render queue ----------
   useEffect(() => {
-    if (!isDisplayingMessages || messageQueue.length === 0) {
-      if (!isDisplayingMessages && messageQueue.length === 0 &&
-          currentStepData && (currentStepData.decisionPoint ||
-          currentStepData.mcq || currentStepData.feedback ||
-          currentStepData.scenarioComplete)) {
-        setShowInteractionArea(true);
-      }
+    if (!isDisplaying || messageQueue.length === 0) {
+      if (!isDisplaying && messageQueue.length === 0 && currentStepData)
+        setShowInteraction(true);
       return;
     }
 
-    const displayNextMessage = () => {
-      setMessageQueue(prevQueue => {
-        const queue = [...prevQueue];
-        const next = queue.shift();
-        if (!next) return queue;
+    const showNext = () => {
+      setMessageQueue(prev => {
+        const q = [...prev]; const next = q.shift(); if (!next) return q;
 
-        const newId = messageIdCounter.current++;
+        timers.current.push(setTimeout(() => {
+          const img = currentStepData?.mainCharacterImage?.startsWith("/")
+            ? currentStepData.mainCharacterImage
+            : getCharacterImagePath(next.character);
+          if (img && img !== mainImg) setMainImg(img);
 
-        // image logic
-        const imageFromStep = currentStepData?.mainCharacterImage;
-        const resolvedImage = imageFromStep && imageFromStep.startsWith("/")
-          ? imageFromStep
-          : getCharacterImagePath(next.character);
-        if (resolvedImage !== mainCharacterImage) setMainCharacterImage(resolvedImage);
+          const newMsg: DisplayMessage = {
+            id: idCounter.current++,
+            character: next.character,
+            pfp: next.pfp,
+            text: next.text
+          };
+          setStaggeredMessages(m => [...m, newMsg]);
 
-        // placeholder
-        setStaggeredMessages(prev => [
-          ...prev,
-          { id: newId, character: next.character, pfp: next.pfp,
-            text: TYPING_INDICATOR, isTyping: true }
-        ]);
+          if (q.length)
+            timers.current.push(setTimeout(showNext, STEP_DELAY_MS));
+          else
+            setIsDisplaying(false);
+        }, MSG_DELAY_MS));
 
-        // replace after delay
-        textUpdateTimeoutRef.current = setTimeout(() => {
-          setStaggeredMessages(prevMsgs =>
-            prevMsgs.map(m =>
-              m.id === newId ? { ...m, text: next.text, isTyping: false } : m
-            ));
-          if (queue.length > 0) {
-            displayTimeoutRef.current =
-              setTimeout(displayNextMessage, NARRATIVE_STEP_DELAY_MS);
-          } else {
-            setIsDisplayingMessages(false);
-            if (currentStepData && (currentStepData.decisionPoint ||
-                currentStepData.mcq || currentStepData.feedback ||
-                currentStepData.scenarioComplete)) {
-              setShowInteractionArea(true);
-            }
-          }
-        }, TYPING_INDICATOR_DELAY_MS);
-
-        return queue;
+        return q;
       });
     };
 
-    displayTimeoutRef.current = setTimeout(
-      displayNextMessage,
-      staggeredMessages.length === 1 && staggeredMessages[0].isTyping ? 100
-                                                                      : NARRATIVE_STEP_DELAY_MS
-    );
-
-    return () => { clearDisplayTimeouts(); };
+    showNext();
+    return clearTimers;
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isDisplayingMessages, messageQueue, currentStepData,
-      staggeredMessages, mainCharacterImage, clearDisplayTimeouts]);
+  }, [isDisplaying, messageQueue]);
 
-  // Progress bar (unchanged)
+  // ---------- scroll ----------
+  useEffect(() => { endRef.current?.scrollIntoView({ behavior: "smooth" }); },
+            [staggeredMessages]);
+
+  // ---------- progress ----------
   useEffect(() => {
-    let p = 5;
-    if (decisionCount === 1) p = 25;
-    else if (decisionCount === 2) p = 50;
-    else if (decisionCount === 3) p = 75;
+    let p = 5 + decisionCount * 25;
     if (currentStepData?.mcq && !hasAnsweredMcq) p = 90;
     if (hasAnsweredMcq && !isComplete) p = 95;
     if (isComplete) p = 100;
     setProgress(p);
   }, [decisionCount, currentStepData, hasAnsweredMcq, isComplete]);
 
-  // Auto-scroll
-  useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [staggeredMessages]);
+  // ---------- API ----------
+  const loadScenarioStep = useCallback(
+    async (decisionIndex: number | null) => {
+      clearTimers();
+      setIsLoadingApi(true);
+      setShowInteraction(false);
 
-  // --- Core Logic ---
+      try {
+        const res = await fetch("/api/lessons", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ userId: userIdRef.current, decisionIndex })
+        });
+        const txt = await res.text();
+        if (!res.ok) throw new Error(txt);
+        const data = JSON.parse(txt);
+        if (data.error) throw new Error(data.error);
+        setCurrentStepData(data.scenarioStep);
+      } catch (e:any) {
+        setError(e.message || "Unknown error");
+      } finally {
+        setIsLoadingApi(false);
+      }
+    }, []);
 
-  // Fetch Scenario Step
-  const loadScenarioStep = useCallback(async (decisionIndex: number | null, uid: string) => {
-    if (!uid) { setError("User ID is missing."); return; }
-
-    // 🔧 NEW – tidy up UI before request
-    flushTypingIndicators();
-    setIsLoadingApi(true);
-    setError(null);
-    setShowInteractionArea(false);
-    clearDisplayTimeouts();
-    setIsDisplayingMessages(false);
-
-    try {
-      const res = await fetch("/api/lessons", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ userId: uid, decisionIndex })
-      });
-      const txt = await res.text();
-      if (!res.ok) throw new Error(txt);
-      const data = JSON.parse(txt);
-      if (data.error) throw new Error(data.error);
-      setCurrentStepData(data.scenarioStep);
-    } catch (err: any) {
-      console.error("loadScenarioStep error:", err);
-      setError(err.message || "Unknown error.");
-    } finally {
-      setIsLoadingApi(false);
-    }
-  }, [clearDisplayTimeouts]);
-
-  // Select/submit decision (unchanged)
-  function handleSelectDecisionOption(i: number) {
-    if (isLoadingApi || isDisplayingMessages || currentStepData?.mcq || isComplete) return;
-    setSelectedDecisionOption(i);
-  }
-  async function submitDecision() {
-    if (selectedDecisionOption === null || !userId || !currentStepData?.decisionPoint) return;
-    const text = currentStepData.decisionPoint.options[selectedDecisionOption]?.text;
-    setStaggeredMessages(prev => [...prev, {
-      id: messageIdCounter.current++, character: "User", pfp: null,
+  // ---------- decision handlers ----------
+  const submitDecision = async () => {
+    if (selectedDecision === null || !currentStepData?.decisionPoint) return;
+    const text = currentStepData.decisionPoint.options[selectedDecision].text;
+    setStaggeredMessages(m => [...m, {
+      id: idCounter.current++, character: "User", pfp: null,
       text: `I choose: "${text}"`, isDecision: true
     }]);
     setDecisionCount(c => c + 1);
-    setSelectedDecisionOption(null);
-    setShowInteractionArea(false);
-    await loadScenarioStep(selectedDecisionOption, userId);
-  }
-
-  // Select/submit MCQ (unchanged except lastMcqRef grading)
-  function handleSelectMcqOption(i: number) {
-    if (hasAnsweredMcq || isLoadingApi || isDisplayingMessages || isComplete) return;
-    setSelectedMcqOption(i);
-  }
-  async function submitMcqAnswer() {
-    if (selectedMcqOption === null || !userId || !currentStepData?.mcq || hasAnsweredMcq) return;
-    const ans = currentStepData.mcq.options[selectedMcqOption];
-    setStaggeredMessages(prev => [...prev, {
-      id: messageIdCounter.current++, character: "User", pfp: null,
-      text: `My answer: "${ans}"`, isDecision: false
+    setSelectedDecision(null);
+    await loadScenarioStep(selectedDecision);
+  };
+  const submitMcq = async () => {
+    if (selectedMcq === null || !currentStepData?.mcq || hasAnsweredMcq) return;
+    const text = currentStepData.mcq.options[selectedMcq];
+    setStaggeredMessages(m => [...m, {
+      id: idCounter.current++, character: "User", pfp: null,
+      text: `My answer: "${text}"`
     }]);
     setHasAnsweredMcq(true);
-    setShowInteractionArea(false);
-    await loadScenarioStep(null, userId);
-  }
+    await loadScenarioStep(null);
+  };
 
-  function handleEndScenario() { router.push("/dashboard"); }
+  // ---------- visibility ----------
+  const canInteract     = showInteraction && !isDisplaying && !isLoadingApi;
+  const showDecisionOpt = canInteract && currentStepData?.decisionPoint;
+  const showMcqOpt      = canInteract && currentStepData?.mcq && !hasAnsweredMcq;
+  const showFeedback    = canInteract && currentStepData?.feedback && hasAnsweredMcq;
+  const showComplete    = canInteract && isComplete && !showFeedback;
 
-  // --- Visibility Flags (simplified) ---
-  const canShowInteraction   = showInteractionArea && !isDisplayingMessages && !isLoadingApi;
-  const isShowingFeedback    = canShowInteraction && currentStepData?.feedback && hasAnsweredMcq;
-  const isShowingCompletion  = canShowInteraction && isComplete && !isShowingFeedback;
-  const isShowingDecisionOpt = canShowInteraction && currentStepData?.decisionPoint && !isShowingFeedback && !isShowingCompletion;
-  const isShowingMcqOpt      = canShowInteraction && currentStepData?.mcq && !hasAnsweredMcq && !isShowingFeedback && !isShowingCompletion;
-
-  // --- Render ---
-  if (error) {
-    return (
-      <div className="flex items-center justify-center min-h-screen bg-red-100">
-        <div className="bg-white p-6 rounded shadow-lg text-center max-w-md">
-          <h2 className="text-xl font-semibold text-red-700 mb-4">Error</h2>
-          <p className="text-red-600 mb-4">{error}</p>
-          <button
-            onClick={() => { setError(null); router.push("/dashboard"); }}
-            className="px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-600">
-            Go to Dashboard
-          </button>
-        </div>
+  // ---------- render ----------
+  if (error) return (
+    <div className="flex items-center justify-center min-h-screen bg-red-100">
+      <div className="bg-white p-6 rounded shadow-lg text-center max-w-md">
+        <h2 className="text-xl font-semibold text-red-700 mb-4">Error</h2>
+        <p className="text-red-600 mb-4">{error}</p>
+        <button onClick={()=>router.push("/dashboard")}
+          className="px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-600">
+          Go to Dashboard
+        </button>
       </div>
-    );
-  }
+    </div>
+  );
 
   return (
-    <div
-      className="relative w-full h-screen flex flex-col overflow-hidden"
-      style={{ backgroundImage: `url(/game/bgs/bg_1.png)`,
-               backgroundSize: 'cover', backgroundPosition: 'center' }}>
+    <div className="relative w-full h-screen flex flex-col overflow-hidden"
+         style={{backgroundImage:`url(/game/bgs/bg_1.png)`,
+                 backgroundSize:"cover",backgroundPosition:"center"}}>
 
-      {/* top bar */}
+      {/* progress bar */}
       <div className="absolute top-0 left-0 right-0 z-20 p-3 flex items-center gap-4">
         <div className="flex-grow flex items-center gap-2 bg-black/30 backdrop-blur-sm p-2 rounded-full shadow">
           <div className="w-full bg-gray-700 rounded-full h-4 overflow-hidden border border-gray-600">
-            <div
-              className="bg-gradient-to-r from-orange-400 to-yellow-500 h-4 rounded-full transition-all duration-500 ease-out"
-              style={{ width: `${progress}%` }} />
+            <div className="bg-gradient-to-r from-orange-400 to-yellow-500 h-4 rounded-full transition-all duration-500 ease-out"
+                 style={{width:`${progress}%`}}/>
           </div>
-          <span className="text-xs font-medium text-yellow-200 w-8 text-right">
-            {progress}%
-          </span>
+          <span className="text-xs font-medium text-yellow-200 w-8 text-right">{progress}%</span>
         </div>
         <div className="shrink-0 bg-black/30 backdrop-blur-sm p-2 rounded-full shadow">
-          <Image src="/game/book.svg" alt="Scenario Log" width={28} height={28} />
+          <Image src="/game/book.svg" alt="Log" width={28} height={28}/>
         </div>
       </div>
 
-      {/* main content */}
+      {/* body */}
       <div className="flex-grow flex flex-col overflow-hidden pt-16">
 
-        {/* character image */}
+        {/* main character */}
         <div className="relative flex-shrink-0 h-[35vh] md:h-[40vh] flex justify-center items-end pointer-events-none">
-          {mainCharacterImage && (
-            <Image
-              key={mainCharacterImage}
-              src={mainCharacterImage}
-              alt="Character"
-              width={250}
-              height={400}
-              className="object-contain max-h-full animate-fade-in"
-              priority />
+          {mainImg && (
+            <Image key={mainImg} src={mainImg} alt="Character"
+                   width={250} height={400}
+                   className="object-contain max-h-full animate-fade-in" priority/>
           )}
         </div>
 
-        {/* chat history */}
-        <div className="flex-grow overflow-y-auto p-4 space-y-3 scrollbar-thin
-                        scrollbar-thumb-gray-400 scrollbar-track-transparent mb-2">
-          {staggeredMessages.map(msg => (
-            <div key={msg.id}
-                 className={`flex items-end gap-2 ${msg.character === "User"
-                   ? "justify-end" : "justify-start"}`}>
-
-              {msg.character !== "User" && msg.pfp && (
+        {/* chat */}
+        <div className="flex-grow overflow-y-auto p-4 space-y-3 scrollbar-thin scrollbar-thumb-gray-400 scrollbar-track-transparent mb-2">
+          {staggeredMessages.map(m => (
+            <div key={m.id} className={`flex items-end gap-2 ${m.character==="User"?"justify-end":"justify-start"}`}>
+              {m.character!=="User" && m.pfp && (
                 <div className="w-8 h-8 md:w-10 md:h-10 rounded-full overflow-hidden shrink-0 shadow border border-white/20 mb-1 self-start">
-                  <Image src={msg.pfp} alt={`${msg.character} pfp`}
-                         width={40} height={40} className="object-cover" />
+                  <Image src={m.pfp} alt={`${m.character} pfp`} width={40} height={40} className="object-cover"/>
                 </div>
               )}
-              {msg.character === "User" && <div className="w-8 md:w-10 shrink-0"></div>}
+              {m.character==="User" && <div className="w-8 md:w-10 shrink-0"/>}
 
               <div className={`max-w-[75%] md:max-w-[65%] px-3 py-2 rounded-xl shadow-md
-                               ${msg.character === "User"
-                                 ? "bg-blue-600 text-white rounded-br-none"
-                                 : msg.isTyping
-                                   ? "bg-gray-300 text-gray-600 rounded-bl-none"
-                                   : "bg-white/90 text-gray-900 rounded-bl-none"}`}>
-                {msg.character !== "User" && !msg.isTyping && (
-                  <p className="text-xs font-semibold mb-0.5 text-indigo-700">
-                    {msg.character}
-                  </p>
+                               ${m.character==="User"
+                                 ?"bg-blue-600 text-white rounded-br-none"
+                                 :"bg-white/90 text-gray-900 rounded-bl-none"}`}>
+                {m.character!=="User" && (
+                  <p className="text-xs font-semibold mb-0.5 text-indigo-700">{m.character}</p>
                 )}
-                <p className={`text-sm leading-relaxed break-words
-                               ${msg.isTyping ? "animate-pulse" : ""}`}>
-                  {msg.text}
-                </p>
+                <p className="text-sm leading-relaxed break-words">{m.text}</p>
               </div>
             </div>
           ))}
-
-          {isLoadingApi && !isInitialLoading && (
-            <div className="flex items-end gap-2 justify-start">
-              <div className="w-8 h-8 md:w-10 md:h-10 rounded-full shrink-0 bg-gray-300 animate-pulse"></div>
-              <div className="max-w-[75%] md:max-w-[65%] px-3 py-2 rounded-xl shadow-md
-                              bg-gray-300 rounded-bl-none">
-                <span className="animate-pulse text-sm text-gray-500">...</span>
-              </div>
-            </div>
-          )}
-
-          <div ref={messagesEndRef} />
+          <div ref={endRef}/>
         </div>
 
         {/* interaction area */}
         <div className={`relative p-3 bg-black/20 backdrop-blur-sm border-t border-white/10
-                         shrink-0 min-h-[100px] flex flex-col justify-center
-                         transition-opacity duration-300 ${showInteractionArea
-                         ? "opacity-100" : "opacity-0 pointer-events-none"}`}>
+                         shrink-0 flex flex-col justify-center
+                         transition-opacity duration-300 ${showInteraction
+                         ?"opacity-100":"opacity-0 pointer-events-none"}`}>
 
-          {/* decision options */}
-          {isShowingDecisionOpt && currentStepData?.decisionPoint && (
+          {/* decision choices */}
+          {showDecisionOpt && currentStepData?.decisionPoint && (
             <div className="w-full max-w-lg mx-auto animate-fade-in">
               <p className="font-semibold text-sm mb-3 text-center text-white">
                 {currentStepData.decisionPoint.question}
               </p>
-              {currentStepData.decisionPoint.options?.length === 4 ? (
-                <>
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 mb-3">
-                    {currentStepData.decisionPoint.options.map((opt, idx) => (
-                      <button key={idx}
-                        onClick={() => handleSelectDecisionOption(idx)}
-                        className={`p-2.5 rounded-lg border-2 text-sm text-left
-                          transition-all duration-150
-                          ${selectedDecisionOption === idx
-                            ? "border-yellow-400 bg-yellow-400/20 shadow-lg scale-105 text-yellow-100 ring-2 ring-yellow-300"
-                            : "border-gray-400 bg-white/70 hover:bg-white/90 text-gray-800 hover:border-gray-500"}`}>
-                        {opt.text}
-                      </button>
-                    ))}
-                  </div>
-                  <button
-                    onClick={submitDecision}
-                    disabled={selectedDecisionOption === null || isLoadingApi || isDisplayingMessages}
-                    className="w-full px-4 py-2 bg-gradient-to-r from-green-500 to-emerald-600 text-white
-                               rounded-lg text-sm font-bold hover:from-green-600 hover:to-emerald-700
-                               disabled:opacity-50 disabled:cursor-not-allowed shadow-lg
-                               transform hover:scale-102 transition-transform">
-                    Confirm Choice
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 mb-3">
+                {currentStepData.decisionPoint.options.map((o,i)=>(
+                  <button key={i} onClick={()=>setSelectedDecision(i)}
+                          className={`p-2.5 rounded-lg border-2 text-sm text-left transition-all
+                            ${selectedDecision===i
+                              ?"border-yellow-400 bg-yellow-400/20 shadow-lg scale-105 text-yellow-100 ring-2 ring-yellow-300"
+                              :"border-gray-400 bg-white/70 hover:bg-white/90 text-gray-800 hover:border-gray-500"}`}>
+                    {o.text}
                   </button>
-                </>
-              ) : (
-                <p className="text-center text-red-400 text-sm">
-                  Error: Invalid number of options.
-                </p>
-              )}
+                ))}
+              </div>
+              <button onClick={submitDecision} disabled={selectedDecision===null || isLoadingApi}
+                      className="w-full px-4 py-2 bg-gradient-to-r from-green-500 to-emerald-600 text-white rounded-lg text-sm font-bold hover:from-green-600 hover:to-emerald-700 disabled:opacity-50">
+                Confirm Choice
+              </button>
             </div>
           )}
 
-          {/* MCQ options */}
-          {isShowingMcqOpt && currentStepData?.mcq && (
+          {/* MCQ */}
+          {showMcqOpt && currentStepData?.mcq && (
             <div className="w-full max-w-lg mx-auto animate-fade-in">
               <p className="font-semibold text-sm mb-3 text-center text-white">
                 {currentStepData.mcq.question}
               </p>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 mb-3">
-                {currentStepData.mcq.options.map((opt, idx) => (
-                  <button key={idx}
-                    onClick={() => handleSelectMcqOption(idx)}
-                    className={`p-2.5 rounded-lg border-2 text-sm text-left
-                      transition-all duration-150
-                      ${selectedMcqOption === idx
-                        ? "border-cyan-400 bg-cyan-400/20 shadow-lg scale-105 text-cyan-100 ring-2 ring-cyan-300"
-                        : "border-gray-400 bg-white/70 hover:bg-white/90 text-gray-800 hover:border-gray-500"}`}>
-                    {opt}
+                {currentStepData.mcq.options.map((o,i)=>(
+                  <button key={i} onClick={()=>setSelectedMcq(i)}
+                          className={`p-2.5 rounded-lg border-2 text-sm text-left transition-all
+                            ${selectedMcq===i
+                              ?"border-cyan-400 bg-cyan-400/20 shadow-lg scale-105 text-cyan-100 ring-2 ring-cyan-300"
+                              :"border-gray-400 bg-white/70 hover:bg-white/90 text-gray-800 hover:border-gray-500"}`}>
+                    {o}
                   </button>
                 ))}
               </div>
-              <button
-                onClick={submitMcqAnswer}
-                disabled={selectedMcqOption === null || isLoadingApi || isDisplayingMessages}
-                className="w-full px-4 py-2 bg-gradient-to-r from-blue-500 to-indigo-600 text-white
-                           rounded-lg text-sm font-bold hover:from-blue-600 hover:to-indigo-700
-                           disabled:opacity-50 disabled:cursor-not-allowed shadow-lg
-                           transform hover:scale-102 transition-transform">
+              <button onClick={submitMcq} disabled={selectedMcq===null || isLoadingApi}
+                      className="w-full px-4 py-2 bg-gradient-to-r from-blue-500 to-indigo-600 text-white rounded-lg text-sm font-bold hover:from-blue-600 hover:to-indigo-700 disabled:opacity-50">
                 Submit Answer
               </button>
             </div>
           )}
 
           {/* feedback */}
-          {isShowingFeedback && currentStepData?.feedback && (
+          {showFeedback && currentStepData?.feedback && (
             <div className="text-sm text-center max-w-lg mx-auto animate-fade-in">
-              {selectedMcqOption === lastMcqRef.current?.correctOptionIndex ? (
-                <p className="font-medium mb-3 p-2 rounded border
-                               bg-green-700/80 border-green-500 text-green-100">
+              {selectedMcq === lastMcqRef.current?.correctOptionIndex ? (
+                <p className="font-medium mb-3 p-2 rounded border bg-green-700/80 border-green-500 text-green-100">
                   <strong>Correct!</strong> {currentStepData.feedback.correctFeedback}
                 </p>
               ) : (
-                <p className="font-medium mb-3 p-2 rounded border
-                               bg-red-700/80 border-red-500 text-red-100">
+                <p className="font-medium mb-3 p-2 rounded border bg-red-700/80 border-red-500 text-red-100">
                   <strong>Incorrect.</strong> {currentStepData.feedback.incorrectFeedback}
                 </p>
               )}
-
               {isComplete && (
-                <button onClick={handleEndScenario}
-                  className="mt-2 px-6 py-2 bg-gradient-to-r
-                             from-purple-500 to-pink-600 text-white rounded-lg
-                             text-sm font-bold hover:from-purple-600 hover:to-pink-700
-                             shadow-lg transform hover:scale-105 transition-transform">
+                <button onClick={()=>router.push("/dashboard")}
+                        className="mt-2 px-6 py-2 bg-gradient-to-r from-purple-500 to-pink-600 text-white rounded-lg text-sm font-bold hover:from-purple-600 hover:to-pink-700">
                   Return to Dashboard
                 </button>
               )}
@@ -530,15 +373,11 @@ export default function NarrativeGamePage() {
           )}
 
           {/* completion */}
-          {isShowingCompletion && (
+          {showComplete && (
             <div className="text-center max-w-lg mx-auto animate-fade-in">
-              <p className="font-semibold text-lg text-yellow-300 mb-4">
-                Scenario Complete!
-              </p>
-              <button onClick={handleEndScenario}
-                className="px-6 py-2 bg-gradient-to-r from-purple-500 to-pink-600 text-white
-                           rounded-lg text-sm font-bold hover:from-purple-600 hover:to-pink-700
-                           shadow-lg transform hover:scale-105 transition-transform">
+              <p className="font-semibold text-lg text-yellow-300 mb-4">Scenario Complete!</p>
+              <button onClick={()=>router.push("/dashboard")}
+                      className="px-6 py-2 bg-gradient-to-r from-purple-500 to-pink-600 text-white rounded-lg text-sm font-bold hover:from-purple-600 hover:to-pink-700">
                 Return to Dashboard
               </button>
             </div>
