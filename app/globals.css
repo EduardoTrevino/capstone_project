@@ -50,6 +50,9 @@
   }
 }
 
+@keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+.animate-fade-in { animation: fadeIn 0.5s ease-in-out; }
+
 /* Now define a utility class for that font: */
 .font-press {
   font-family: 'Press Start 2P', cursive;
@@ -61,14 +64,6 @@
   }
   body {
     @apply bg-background text-foreground;
-  }
-  @keyframes fadeIn {
-    from { opacity: 0; }
-    to { opacity: 1; }
-  }
-  
-  .animate-fade-in {
-    animation: fadeIn 0.5s ease-in-out;
   }
 }
 
