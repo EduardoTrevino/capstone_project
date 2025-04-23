@@ -4,7 +4,7 @@ import { useState, useEffect, useRef, useCallback } from "react";
 import Image from "next/image";
 import { useRouter } from "next/navigation";
 
-// --- Interfaces (unchanged) ---
+// --- Interfaces ---
 interface NarrativeDialogue {
   character: "Rani" | "Ali" | "Yash" | "Nisha" | "Narrator";
   pfp: string;
@@ -23,35 +23,36 @@ interface ScenarioStep {
   scenarioComplete: boolean;
   error?: string;
 }
+
+// --- REMOVED isTyping flag ---
 interface DisplayMessage {
   id: number;
   character: string;
   pfp: string | null;
   text: string;
   isDecision?: boolean;
-  isTyping?: boolean;
+  // isTyping?: boolean; // Removed
 }
 
 // --- Constants ---
-const NARRATIVE_STEP_DELAY_MS = 2500;
-const TYPING_INDICATOR_DELAY_MS = 500;
-const TYPING_INDICATOR = "...";
+const NARRATIVE_STEP_DELAY_MS = 1800; // Slightly increased delay to compensate for no typing indicator
 
 // --- Helper Function to Map Character Name to Image Path ---
 const getCharacterImagePath = (characterName: string | null): string | null => {
-  if (!characterName) return null;
-  const basePath = '/game/characters/';
-  switch (characterName.toLowerCase()) {
-    case 'rani':      return `${basePath}rani.png`;
-    case 'ali':       return `${basePath}ali.png`;
-    case 'yash':      return `${basePath}yash.png`;
-    case 'nisha':     return `${basePath}nisha.png`;
-    case 'narrator':  return `${basePath}narrator.png`;
-    default:
-      console.warn(`Mapping not found for character image: ${characterName}`);
-      return null;
-  }
+    if (!characterName) return null;
+    const basePath = '/game/characters/';
+    switch (characterName.toLowerCase()) {
+        case 'rani':      return `${basePath}rani.png`;
+        case 'ali':       return `${basePath}ali.png`;
+        case 'yash':      return `${basePath}yash.png`;
+        case 'nisha':     return `${basePath}nisha.png`;
+        case 'narrator':  return `${basePath}narrator.png`; // Ensure this exists
+        default:
+            console.warn(`Mapping not found for character image: ${characterName}`);
+            return null;
+    }
 };
+
 
 export default function NarrativeGamePage() {
   const router = useRouter();
@@ -77,25 +78,18 @@ export default function NarrativeGamePage() {
   const messagesEndRef = useRef<null | HTMLDivElement>(null);
   const messageIdCounter = useRef(0);
   const displayTimeoutRef = useRef<NodeJS.Timeout | null>(null);
-  const textUpdateTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  // const textUpdateTimeoutRef = useRef<NodeJS.Timeout | null>(null); // Removed
 
-  // 🔧 NEW – remember last MCQ so we can grade even after it disappears
+  // 🔧 NEW – remember last MCQ
   const lastMcqRef = useRef<MCQ | null>(null);
 
   // --- Helpers ---
   const clearDisplayTimeouts = useCallback(() => {
     if (displayTimeoutRef.current) clearTimeout(displayTimeoutRef.current);
-    if (textUpdateTimeoutRef.current) clearTimeout(textUpdateTimeoutRef.current);
+    // if (textUpdateTimeoutRef.current) clearTimeout(textUpdateTimeoutRef.current); // Removed
     displayTimeoutRef.current = null;
-    textUpdateTimeoutRef.current = null;
+    // textUpdateTimeoutRef.current = null; // Removed
   }, []);
-
-  // 🔧 NEW – finish any lingering typing bubbles
-  const flushTypingIndicators = () => {
-    setStaggeredMessages(prev =>
-      prev.map(m => m.isTyping ? { ...m, isTyping: false, text: "" } : m)
-    );
-  };
 
   // --- Effects ---
 
@@ -104,13 +98,9 @@ export default function NarrativeGamePage() {
     const storedUserId = localStorage.getItem("userId");
     if (!storedUserId) { router.push("/"); return; }
     setUserId(storedUserId);
-    setStaggeredMessages([{
-      id: messageIdCounter.current++,
-      character: "Narrator",
-      pfp: "/game/character_pfp/narrator.png",
-      text: TYPING_INDICATOR,
-      isTyping: true
-    }]);
+    // 🔧 No initial typing message needed now
+    setStaggeredMessages([]);
+    setIsInitialLoading(true); // Set back to true until first API call finishes
     loadScenarioStep(null, storedUserId);
     return () => { clearDisplayTimeouts(); };
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -122,110 +112,120 @@ export default function NarrativeGamePage() {
 
     clearDisplayTimeouts();
     setShowInteractionArea(false);
+    setIsInitialLoading(false); // API response received, initial load done
 
-    if (isInitialLoading &&
-        Array.isArray(currentStepData.narrativeSteps) &&
-        currentStepData.narrativeSteps.length > 0) {
-      setStaggeredMessages([]);
-    }
-    setIsInitialLoading(false);
+     // --- Main Character Image Logic (moved here for clarity) ---
+     // Prefer image from step data if it's a valid path
+     let stepImage = null;
+     if (currentStepData.mainCharacterImage && currentStepData.mainCharacterImage.startsWith('/')) {
+         stepImage = currentStepData.mainCharacterImage;
+         console.log("Using mainCharacterImage from step data:", stepImage);
+     }
+     // If step doesn't provide image, try mapping first character of narrative steps
+     else if (Array.isArray(currentStepData.narrativeSteps) && currentStepData.narrativeSteps.length > 0) {
+        const firstCharacter = currentStepData.narrativeSteps[0]?.character;
+        stepImage = getCharacterImagePath(firstCharacter);
+        if (stepImage) console.log(`Using mapped image for first character ${firstCharacter}: ${stepImage}`);
+     }
+     // Only update state if the resolved path is different
+     if (stepImage !== mainCharacterImage) {
+         setMainCharacterImage(stepImage);
+     }
+     // --- End Main Character Image Logic ---
 
-    if (currentStepData.mainCharacterImage !== undefined) {
-      if (currentStepData.mainCharacterImage &&
-          currentStepData.mainCharacterImage.startsWith("/")) {
-        setMainCharacterImage(currentStepData.mainCharacterImage);
-      }
-    }
 
-    if (currentStepData.mcq) {          // 🔧 NEW – keep reference
-      lastMcqRef.current = currentStepData.mcq;
-    }
+    if (currentStepData.mcq) { lastMcqRef.current = currentStepData.mcq; } // Remember MCQ
 
-    if (Array.isArray(currentStepData.narrativeSteps) &&
-        currentStepData.narrativeSteps.length > 0) {
+    // Queue narrative steps if they exist
+    if (Array.isArray(currentStepData.narrativeSteps) && currentStepData.narrativeSteps.length > 0) {
       setMessageQueue([...currentStepData.narrativeSteps]);
-      setIsDisplayingMessages(true);
+      setIsDisplayingMessages(true); // Start processing
     } else {
+      // No narrative steps, check if interactions should appear immediately
       setMessageQueue([]);
       setIsDisplayingMessages(false);
-      if (currentStepData.decisionPoint || currentStepData.mcq ||
-          currentStepData.feedback || currentStepData.scenarioComplete) {
+      if (currentStepData.decisionPoint || currentStepData.mcq || currentStepData.feedback || currentStepData.scenarioComplete) {
         setShowInteractionArea(true);
       }
     }
 
+    // Update final states
     if (currentStepData.scenarioComplete) setIsComplete(true);
     if (currentStepData.feedback) setHasAnsweredMcq(true);
     if (currentStepData.error) setError(currentStepData.error);
-  }, [currentStepData, isLoadingApi, clearDisplayTimeouts]);
 
-  // Process message queue (unchanged except for comments)
+  // Depend only on step data and loading status
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentStepData, isLoadingApi]);
+
+  // --- Process message queue (Simplified: No Typing Indicator) ---
   useEffect(() => {
     if (!isDisplayingMessages || messageQueue.length === 0) {
-      if (!isDisplayingMessages && messageQueue.length === 0 &&
-          currentStepData && (currentStepData.decisionPoint ||
-          currentStepData.mcq || currentStepData.feedback ||
-          currentStepData.scenarioComplete)) {
-        setShowInteractionArea(true);
+      // If queue processing is done, check if interaction area should be shown
+      if (!isDisplayingMessages && messageQueue.length === 0 && currentStepData && (currentStepData.decisionPoint || currentStepData.mcq || currentStepData.feedback || currentStepData.scenarioComplete)) {
+          setShowInteractionArea(true);
       }
-      return;
+      return; // Stop if not displaying or queue is empty
     }
 
     const displayNextMessage = () => {
       setMessageQueue(prevQueue => {
         const queue = [...prevQueue];
-        const next = queue.shift();
-        if (!next) return queue;
+        const nextMessageToShow = queue.shift();
 
-        const newId = messageIdCounter.current++;
+        if (nextMessageToShow) {
+           // *** Directly add the final message after delay ***
+           displayTimeoutRef.current = setTimeout(() => {
+              // Update main image based on THIS specific character *if* step didn't provide one
+               const stepImage = currentStepData?.mainCharacterImage;
+               if (!stepImage || !stepImage.startsWith('/')) {
+                   const charImage = getCharacterImagePath(nextMessageToShow.character);
+                   // Only update if different to avoid unnecessary re-renders
+                   if (charImage !== mainCharacterImage) {
+                     setMainCharacterImage(charImage);
+                     console.log(`Setting character image for specific message: ${nextMessageToShow.character} -> ${charImage}`);
+                   }
+               }
 
-        // image logic
-        const imageFromStep = currentStepData?.mainCharacterImage;
-        const resolvedImage = imageFromStep && imageFromStep.startsWith("/")
-          ? imageFromStep
-          : getCharacterImagePath(next.character);
-        if (resolvedImage !== mainCharacterImage) setMainCharacterImage(resolvedImage);
+               // Add the actual message
+               setStaggeredMessages(prev => [...prev, {
+                   id: messageIdCounter.current++,
+                   character: nextMessageToShow.character,
+                   pfp: nextMessageToShow.pfp,
+                   text: nextMessageToShow.text,
+                   isTyping: false, // Always false now
+                   isDecision: false
+               }]);
 
-        // placeholder
-        setStaggeredMessages(prev => [
-          ...prev,
-          { id: newId, character: next.character, pfp: next.pfp,
-            text: TYPING_INDICATOR, isTyping: true }
-        ]);
-
-        // replace after delay
-        textUpdateTimeoutRef.current = setTimeout(() => {
-          setStaggeredMessages(prevMsgs =>
-            prevMsgs.map(m =>
-              m.id === newId ? { ...m, text: next.text, isTyping: false } : m
-            ));
-          if (queue.length > 0) {
-            displayTimeoutRef.current =
-              setTimeout(displayNextMessage, NARRATIVE_STEP_DELAY_MS);
-          } else {
-            setIsDisplayingMessages(false);
-            if (currentStepData && (currentStepData.decisionPoint ||
-                currentStepData.mcq || currentStepData.feedback ||
-                currentStepData.scenarioComplete)) {
-              setShowInteractionArea(true);
-            }
-          }
-        }, TYPING_INDICATOR_DELAY_MS);
-
-        return queue;
+               // Schedule next cycle or finish
+               if (queue.length > 0) {
+                   // No need for separate text update timeout
+                   displayTimeoutRef.current = setTimeout(displayNextMessage, NARRATIVE_STEP_DELAY_MS);
+               } else {
+                   setIsDisplayingMessages(false); // Queue finished
+                   if (currentStepData && (currentStepData.decisionPoint || currentStepData.mcq || currentStepData.feedback || currentStepData.scenarioComplete)) {
+                       setShowInteractionArea(true); // Show interaction after last message
+                   }
+               }
+           }, NARRATIVE_STEP_DELAY_MS); // Delay before showing the message
+        } else {
+           // Queue became empty unexpectedly
+           setIsDisplayingMessages(false);
+            if (currentStepData && (currentStepData.decisionPoint || currentStepData.mcq || currentStepData.feedback || currentStepData.scenarioComplete)) {
+               setShowInteractionArea(true);
+           }
+        }
+        return queue; // Return remaining queue
       });
     };
 
-    displayTimeoutRef.current = setTimeout(
-      displayNextMessage,
-      staggeredMessages.length === 1 && staggeredMessages[0].isTyping ? 100
-                                                                      : NARRATIVE_STEP_DELAY_MS
-    );
+    // Start the first message display (or the next one)
+    displayTimeoutRef.current = setTimeout(displayNextMessage, isInitialLoading ? 500 : NARRATIVE_STEP_DELAY_MS); // Show first message faster
 
+    // Cleanup
     return () => { clearDisplayTimeouts(); };
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isDisplayingMessages, messageQueue, currentStepData,
-      staggeredMessages, mainCharacterImage, clearDisplayTimeouts]);
+  // Dependencies updated
+  }, [isDisplayingMessages, messageQueue, currentStepData, clearDisplayTimeouts, isInitialLoading, mainCharacterImage]);
 
   // Progress bar (unchanged)
   useEffect(() => {
@@ -251,7 +251,7 @@ export default function NarrativeGamePage() {
     if (!uid) { setError("User ID is missing."); return; }
 
     // 🔧 NEW – tidy up UI before request
-    flushTypingIndicators();
+    // flushTypingIndicators();
     setIsLoadingApi(true);
     setError(null);
     setShowInteractionArea(false);
@@ -378,37 +378,17 @@ export default function NarrativeGamePage() {
           )}
         </div>
 
-        {/* chat history */}
-        <div className="flex-grow overflow-y-auto p-4 space-y-3 scrollbar-thin
-                        scrollbar-thumb-gray-400 scrollbar-track-transparent mb-2">
+        {/* Chat History */}
+        <div className="flex-grow overflow-y-auto p-4 space-y-3 scrollbar-thin scrollbar-thumb-gray-400 scrollbar-track-transparent mb-2">
           {staggeredMessages.map(msg => (
-            <div key={msg.id}
-                 className={`flex items-end gap-2 ${msg.character === "User"
-                   ? "justify-end" : "justify-start"}`}>
-
-              {msg.character !== "User" && msg.pfp && (
-                <div className="w-8 h-8 md:w-10 md:h-10 rounded-full overflow-hidden shrink-0 shadow border border-white/20 mb-1 self-start">
-                  <Image src={msg.pfp} alt={`${msg.character} pfp`}
-                         width={40} height={40} className="object-cover" />
-                </div>
-              )}
+            // --- REMOVED isTyping logic from rendering ---
+            <div key={msg.id} className={`flex items-end gap-2 ${msg.character === "User" ? "justify-end" : "justify-start"}`}>
+              {msg.character !== "User" && msg.pfp && ( <div className="w-8 h-8 md:w-10 md:h-10 rounded-full overflow-hidden shrink-0 shadow border border-white/20 mb-1 self-start"> <Image src={msg.pfp} alt={`${msg.character} pfp`} width={40} height={40} className="object-cover"/> </div> )}
               {msg.character === "User" && <div className="w-8 md:w-10 shrink-0"></div>}
-
-              <div className={`max-w-[75%] md:max-w-[65%] px-3 py-2 rounded-xl shadow-md
-                               ${msg.character === "User"
-                                 ? "bg-blue-600 text-white rounded-br-none"
-                                 : msg.isTyping
-                                   ? "bg-gray-300 text-gray-600 rounded-bl-none"
-                                   : "bg-white/90 text-gray-900 rounded-bl-none"}`}>
-                {msg.character !== "User" && !msg.isTyping && (
-                  <p className="text-xs font-semibold mb-0.5 text-indigo-700">
-                    {msg.character}
-                  </p>
-                )}
-                <p className={`text-sm leading-relaxed break-words
-                               ${msg.isTyping ? "animate-pulse" : ""}`}>
-                  {msg.text}
-                </p>
+              <div className={`max-w-[75%] md:max-w-[65%] px-3 py-2 rounded-xl shadow-md transition-colors duration-300 ${ msg.character === "User" ? "bg-blue-600 text-white rounded-br-none" : "bg-white/90 text-gray-900 rounded-bl-none" }`} // Simplified style - no typing variant needed
+                 style={{ border: msg.character !== "User" ? '1px solid #e5e7eb' : 'none', backgroundColor: msg.character === "User" ? '#2563eb' : '#f9fafb', color: msg.character === "User" ? '#ffffff' : '#1f2937' }}>
+                {msg.character !== "User" && (<p className="text-xs font-semibold mb-0.5 text-indigo-700">{msg.character}</p>)}
+                <p className={`text-sm leading-relaxed break-words`}>{msg.text}</p> {/* Removed animate-pulse */}
               </div>
             </div>
           ))}
