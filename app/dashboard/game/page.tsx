@@ -1,54 +1,31 @@
-// app/dashboard/game/page.tsx
 "use client";
 
 import { useState, useEffect, useRef, useCallback } from "react";
 import Image from "next/image";
 import { useRouter } from "next/navigation";
 
-// --- Interfaces ---
+// --- Interfaces (Remain the same) ---
 interface NarrativeDialogue {
   character: "Rani" | "Ali" | "Yash" | "Nisha" | "Narrator";
   pfp: string;
   text: string;
 }
-
-interface DecisionPointOption {
-  text: string; // API now guarantees this structure
-}
-
-interface DecisionPoint {
-  question: string;
-  options: DecisionPointOption[]; // Array of objects {text: string}
-}
-
-interface MCQ {
-  question: string;
-  options: string[]; // Array of strings
-  correctOptionIndex: number;
-}
-
-interface Feedback {
-  correctFeedback: string;
-  incorrectFeedback: string;
-}
-
+interface DecisionPointOption { text: string; }
+interface DecisionPoint { question: string; options: DecisionPointOption[]; }
+interface MCQ { question: string; options: string[]; correctOptionIndex: number; }
+interface Feedback { correctFeedback: string; incorrectFeedback: string; }
 interface ScenarioStep {
   narrativeSteps: NarrativeDialogue[];
-  mainCharacterImage: string | null;
+  mainCharacterImage: string | null; // API *should* provide path or null
   decisionPoint: DecisionPoint | null;
   mcq: MCQ | null;
   feedback: Feedback | null;
   scenarioComplete: boolean;
   error?: string;
 }
-
 interface DisplayMessage {
-  id: number;
-  character: string;
-  pfp: string | null;
-  text: string;
-  isDecision?: boolean;
-  isTyping?: boolean;
+  id: number; character: string; pfp: string | null; text: string;
+  isDecision?: boolean; isTyping?: boolean;
 }
 
 // --- Constants ---
@@ -56,17 +33,35 @@ const NARRATIVE_STEP_DELAY_MS = 1500;
 const TYPING_INDICATOR_DELAY_MS = 500;
 const TYPING_INDICATOR = "...";
 
+// --- Helper Function to Map Character Name to Image Path ---
+const getCharacterImagePath = (characterName: string | null): string | null => {
+    if (!characterName) return null;
+    const basePath = '/game/characters/';
+    const lowerCaseName = characterName.toLowerCase();
+    switch (lowerCaseName) {
+        case 'rani': return `${basePath}rani.png`;
+        case 'ali': return `${basePath}ali.png`;
+        case 'yash': return `${basePath}yash.png`;
+        case 'nisha': return `${basePath}nisha.png`;
+        case 'narrator': return `${basePath}narrator.png`; // Ensure this exists
+        default:
+            console.warn(`Mapping not found for character image: ${characterName}`);
+            return null; // Or a default placeholder image path
+    }
+};
+
+
 export default function NarrativeGamePage() {
   const router = useRouter();
 
-  // --- State Variables ---
+  // --- State Variables (Remain the same) ---
   const [currentStepData, setCurrentStepData] = useState<ScenarioStep | null>(null);
   const [staggeredMessages, setStaggeredMessages] = useState<DisplayMessage[]>([]);
   const [messageQueue, setMessageQueue] = useState<NarrativeDialogue[]>([]);
   const [isDisplayingMessages, setIsDisplayingMessages] = useState(false);
   const [showInteractionArea, setShowInteractionArea] = useState(false);
   const [isInitialLoading, setIsInitialLoading] = useState(true);
-  const [mainCharacterImage, setMainCharacterImage] = useState<string | null>(null);
+  const [mainCharacterImage, setMainCharacterImage] = useState<string | null>(null); // Stores the *resolved* path
   const [isLoadingApi, setIsLoadingApi] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [selectedDecisionOption, setSelectedDecisionOption] = useState<number | null>(null);
@@ -86,8 +81,7 @@ export default function NarrativeGamePage() {
   const clearDisplayTimeouts = useCallback(() => {
     if (displayTimeoutRef.current) clearTimeout(displayTimeoutRef.current);
     if (textUpdateTimeoutRef.current) clearTimeout(textUpdateTimeoutRef.current);
-    displayTimeoutRef.current = null;
-    textUpdateTimeoutRef.current = null;
+    displayTimeoutRef.current = null; textUpdateTimeoutRef.current = null;
   }, []);
 
   // --- Effects ---
@@ -97,10 +91,7 @@ export default function NarrativeGamePage() {
     const storedUserId = localStorage.getItem("userId");
     if (!storedUserId) { router.push("/"); return; }
     setUserId(storedUserId);
-    setStaggeredMessages([{
-      id: messageIdCounter.current++, character: "Narrator",
-      pfp: "/game/character_pfp/narrator.png", text: TYPING_INDICATOR, isTyping: true,
-    }]);
+    setStaggeredMessages([{ id: messageIdCounter.current++, character: "Narrator", pfp: "/game/character_pfp/narrator.png", text: TYPING_INDICATOR, isTyping: true }]);
     loadScenarioStep(null, storedUserId);
     return () => { clearDisplayTimeouts(); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -117,20 +108,25 @@ export default function NarrativeGamePage() {
       }
       setIsInitialLoading(false);
 
-      if (currentStepData.mainCharacterImage !== undefined) { // Check if the key exists (even if null)
-        setMainCharacterImage(currentStepData.mainCharacterImage);
-        console.log("Setting main character image:", currentStepData.mainCharacterImage);
-      }
+      // Set the main image based on the *overall step data* if provided, otherwise it will be handled per-message
+       if (currentStepData.mainCharacterImage !== undefined) {
+           // If API sends a direct path, use it. Otherwise, null might be intended.
+           if (currentStepData.mainCharacterImage && currentStepData.mainCharacterImage.startsWith('/')) {
+              setMainCharacterImage(currentStepData.mainCharacterImage);
+              console.log("Setting main character image from step data:", currentStepData.mainCharacterImage);
+           } else {
+               // If it's null or not a path, we'll rely on the per-message logic later
+               // setMainCharacterImage(null); // Optionally clear if API sends null explicitly
+               console.log("Main character image in step data is null or not a path:", currentStepData.mainCharacterImage);
+           }
+       }
 
       if (Array.isArray(currentStepData.narrativeSteps) && currentStepData.narrativeSteps.length > 0) {
         setMessageQueue([...currentStepData.narrativeSteps]);
         setIsDisplayingMessages(true);
       } else {
-        setMessageQueue([]);
-        setIsDisplayingMessages(false);
-        if (currentStepData.decisionPoint || currentStepData.mcq || currentStepData.feedback || currentStepData.scenarioComplete) {
-          setShowInteractionArea(true);
-        }
+        setMessageQueue([]); setIsDisplayingMessages(false);
+        if (currentStepData.decisionPoint || currentStepData.mcq || currentStepData.feedback || currentStepData.scenarioComplete) { setShowInteractionArea(true); }
       }
       if (currentStepData.scenarioComplete) setIsComplete(true);
       if (currentStepData.feedback) setHasAnsweredMcq(true);
@@ -139,12 +135,10 @@ export default function NarrativeGamePage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentStepData, isLoadingApi]);
 
-  // Process Message Queue for Staggered Display
+  // Process Message Queue for Staggered Display (Handles Typing + Main Image Fallback)
   useEffect(() => {
     if (!isDisplayingMessages || messageQueue.length === 0) {
-      if (!isDisplayingMessages && messageQueue.length === 0 && currentStepData && (currentStepData.decisionPoint || currentStepData.mcq || currentStepData.feedback || currentStepData.scenarioComplete)) {
-        setShowInteractionArea(true);
-      }
+      if (!isDisplayingMessages && messageQueue.length === 0 && currentStepData && (currentStepData.decisionPoint || currentStepData.mcq || currentStepData.feedback || currentStepData.scenarioComplete)) { setShowInteractionArea(true); }
       return;
     }
 
@@ -155,21 +149,44 @@ export default function NarrativeGamePage() {
 
         if (nextMessageToShow) {
           const newMessageId = messageIdCounter.current++;
-          const typingMessage: DisplayMessage = {
+
+          // *** FIX: Set Main Character Image based on current narrative step's character ***
+          // Use the image from the overall step if provided, otherwise map the current speaker
+          const imagePathFromStep = currentStepData?.mainCharacterImage;
+          const characterName = nextMessageToShow.character;
+          let imagePathToShow = null;
+
+          if (imagePathFromStep && imagePathFromStep.startsWith('/')) {
+              imagePathToShow = imagePathFromStep;
+          } else {
+              // Fallback: Map character name to path if API didn't provide a valid path for the step
+              imagePathToShow = getCharacterImagePath(characterName);
+              if(imagePathToShow) console.log(`Falling back to mapped image for ${characterName}: ${imagePathToShow}`);
+          }
+           // Only update state if the resolved path is different from current
+           if (imagePathToShow !== mainCharacterImage) {
+              setMainCharacterImage(imagePathToShow);
+           }
+
+
+          // Add placeholder message
+          setStaggeredMessages(prev => [...prev, {
             id: newMessageId, character: nextMessageToShow.character, pfp: nextMessageToShow.pfp,
             text: TYPING_INDICATOR, isTyping: true, isDecision: false,
-          };
-          setStaggeredMessages(prev => [...prev, typingMessage]);
+          }]);
 
+          // Schedule the text update
           textUpdateTimeoutRef.current = setTimeout(() => {
+             // *** FIX: Ensure map targets the correct message ID ***
             setStaggeredMessages(prevMessages =>
               prevMessages.map(msg =>
                 msg.id === newMessageId
-                  ? { ...msg, text: nextMessageToShow.text, isTyping: false } // Update text & typing
+                  ? { ...msg, text: nextMessageToShow.text, isTyping: false } // Update text & typing status
                   : msg
               )
             );
 
+            // Schedule the next message cycle
             if (queue.length > 0) {
               displayTimeoutRef.current = setTimeout(displayNextMessage, NARRATIVE_STEP_DELAY_MS);
             } else {
@@ -189,22 +206,18 @@ export default function NarrativeGamePage() {
       });
     };
 
-    // Start slightly faster if replacing initial narrator message
     displayTimeoutRef.current = setTimeout(displayNextMessage, staggeredMessages.length === 1 && staggeredMessages[0].isTyping ? 100 : NARRATIVE_STEP_DELAY_MS);
-
     return () => { clearDisplayTimeouts(); };
-  }, [isDisplayingMessages, messageQueue, currentStepData, clearDisplayTimeouts, staggeredMessages]); // Added staggeredMessages dependency
-
+    // Dependencies include mainCharacterImage now to avoid stale closures if mapping logic changes it
+  }, [isDisplayingMessages, messageQueue, currentStepData, clearDisplayTimeouts, staggeredMessages, mainCharacterImage]);
 
   // Update progress
   useEffect(() => {
     let currentProgress = 5;
-    if (decisionCount === 1) currentProgress = 25;
-    else if (decisionCount === 2) currentProgress = 50;
-    else if (decisionCount === 3) currentProgress = 75;
+    if (decisionCount === 1) currentProgress = 25; else if (decisionCount === 2) currentProgress = 50; else if (decisionCount === 3) currentProgress = 75;
     if (currentStepData?.mcq && !hasAnsweredMcq) currentProgress = 90; // MCQ shown but not answered
     if (hasAnsweredMcq && !isComplete) currentProgress = 95; // MCQ answered / Feedback shown
-    if (isComplete) currentProgress = 100;
+    if (isComplete) currentProgress = 100; // Scenario marked complete
     setProgress(currentProgress);
   }, [decisionCount, currentStepData, hasAnsweredMcq, isComplete]);
 
@@ -221,16 +234,25 @@ export default function NarrativeGamePage() {
     const requestBody = { userId: userIdParam, decisionIndex };
     try {
       const res = await fetch("/api/lessons", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(requestBody) });
-      if (!res.ok) { let errData; try { errData = await res.json(); } catch { /* ignore */ } throw new Error(`HTTP Error ${res.status}: ${errData?.error || res.statusText}`); }
-      const data = await res.json();
+      // Use response.text() first to get more info on errors
+      const responseText = await res.text();
+      if (!res.ok) {
+          console.error("API Response Error Text:", responseText);
+          let errData; try { errData = JSON.parse(responseText); } catch { /* ignore */ }
+          // Use the specific error message if available
+          throw new Error(`HTTP Error ${res.status}: ${errData?.error || res.statusText || responseText}`);
+      }
+      // If response was OK, parse the text as JSON
+      const data = JSON.parse(responseText);
       if (data?.error) { throw new Error(typeof data.error === 'string' ? data.error : JSON.stringify(data.error)); }
       const nextStep: ScenarioStep = data.scenarioStep;
       if (!nextStep || typeof nextStep !== 'object') { throw new Error("Invalid scenario data received from server."); }
       setCurrentStepData(nextStep); // Trigger useEffect to process
     } catch (err: any) {
-      console.error("Error loading scenario step:", err);
+      console.error("Error loading/processing scenario step:", err);
+      // Display the caught error message to the user
       setError(err.message || "An unknown error occurred loading the scenario.");
-      setIsInitialLoading(false);
+      setIsInitialLoading(false); // Stop initial loading indicator on error
     } finally {
       setIsLoadingApi(false);
     }
@@ -245,24 +267,17 @@ export default function NarrativeGamePage() {
   // Submit Decision
   async function submitDecision() {
     if (selectedDecisionOption === null || isLoadingApi || isDisplayingMessages || !userId || !currentStepData?.decisionPoint) return;
-
-    // API should now guarantee options[...].text exists if options array exists
-    const decisionText = currentStepData.decisionPoint.options[selectedDecisionOption]?.text;
-    if (typeof decisionText !== 'string') { // Stricter check
-        console.error("Selected option text not found or invalid structure:", currentStepData.decisionPoint.options[selectedDecisionOption]);
-        setError("Error processing decision. Please try again or refresh.");
-        return;
+    const decisionOptionObject = currentStepData.decisionPoint.options[selectedDecisionOption];
+    const decisionText = decisionOptionObject?.text;
+    if (typeof decisionText !== 'string') {
+        console.error("Selected option text not found or invalid structure:", decisionOptionObject);
+        setError("Error processing decision. Please try again or refresh."); return;
     }
-
-    const userDecisionMessage: DisplayMessage = {
-        id: messageIdCounter.current++, character: "User", pfp: null,
-        text: `I choose: "${decisionText}"`, isDecision: true,
-    };
+    const userDecisionMessage: DisplayMessage = { id: messageIdCounter.current++, character: "User", pfp: null, text: `I choose: "${decisionText}"`, isDecision: true };
     setStaggeredMessages(prev => [...prev, userDecisionMessage]);
     const currentDecisionIndex = selectedDecisionOption;
     setDecisionCount(prev => prev + 1);
-    setSelectedDecisionOption(null);
-    setShowInteractionArea(false);
+    setSelectedDecisionOption(null); setShowInteractionArea(false);
     await loadScenarioStep(currentDecisionIndex, userId);
   }
 
@@ -275,23 +290,12 @@ export default function NarrativeGamePage() {
   // Submit MCQ Answer
   async function submitMcqAnswer() {
     if (selectedMcqOption === null || isLoadingApi || isDisplayingMessages || !userId || !currentStepData?.mcq || hasAnsweredMcq) return;
-
-     // API guarantees options are strings now
      const answerText = currentStepData.mcq.options[selectedMcqOption];
-     if (typeof answerText !== 'string') {
-         console.error("MCQ option is not a string:", answerText); // Should not happen with API fix
-         setError("Error processing answer. Please try again.");
-         return;
-     }
-     const userAnswerMessage: DisplayMessage = {
-         id: messageIdCounter.current++, character: "User", pfp: null,
-         text: `My answer: "${answerText}"`, isDecision: false,
-     };
+     if (typeof answerText !== 'string') { console.error("MCQ option not string:", answerText); setError("Error processing answer."); return; }
+     const userAnswerMessage: DisplayMessage = { id: messageIdCounter.current++, character: "User", pfp: null, text: `My answer: "${answerText}"`, isDecision: false };
      setStaggeredMessages(prev => [...prev, userAnswerMessage]);
-
-    setHasAnsweredMcq(true);
-    setShowInteractionArea(false);
-    await loadScenarioStep(null, userId); // decisionIndex is null
+    setHasAnsweredMcq(true); setShowInteractionArea(false);
+    await loadScenarioStep(null, userId);
   }
 
   // End Scenario
@@ -312,20 +316,22 @@ export default function NarrativeGamePage() {
     );
   }
 
-  // Visibility Flags
-  const isShowingDecisionOptions = showInteractionArea && !isDisplayingMessages && !isLoadingApi && currentStepData?.decisionPoint && !currentStepData.mcq && !hasAnsweredMcq && !isComplete;
-  const isShowingMcqOptions = showInteractionArea && !isDisplayingMessages && !isLoadingApi && currentStepData?.mcq && !hasAnsweredMcq && !isComplete;
-  const isShowingFeedback = showInteractionArea && !isDisplayingMessages && !isLoadingApi && currentStepData?.feedback && hasAnsweredMcq && !isComplete;
-  const isShowingCompletion = showInteractionArea && !isDisplayingMessages && !isLoadingApi && isComplete;
+  // --- Refined Visibility Flags for Feedback/Completion ---
+  const canShowInteraction = showInteractionArea && !isDisplayingMessages && !isLoadingApi;
+  // Show feedback if it exists AND MCQ was answered
+  const isShowingFeedback = canShowInteraction && currentStepData?.feedback && hasAnsweredMcq;
+  // Show completion only if complete AND feedback isn't currently shown (or doesn't exist for this step)
+  const isShowingCompletion = canShowInteraction && isComplete && !isShowingFeedback;
+  // Adjust others to not show if feedback/completion are active
+  const isShowingDecisionOptions = canShowInteraction && currentStepData?.decisionPoint && !isShowingFeedback && !isShowingCompletion;
+  const isShowingMcqOptions = canShowInteraction && currentStepData?.mcq && !hasAnsweredMcq && !isShowingFeedback && !isShowingCompletion;
 
   return (
     <div className="relative w-full h-screen flex flex-col overflow-hidden" style={{ backgroundImage: `url(/game/bgs/bg_1.png)`, backgroundSize: 'cover', backgroundPosition: 'center' }}>
       {/* Top Bar */}
       <div className="absolute top-0 left-0 right-0 z-20 p-3 flex items-center gap-4">
         <div className="flex-grow flex items-center gap-2 bg-black/30 backdrop-blur-sm p-2 rounded-full shadow">
-          <div className="w-full bg-gray-700 rounded-full h-4 overflow-hidden border border-gray-600">
-            <div className="bg-gradient-to-r from-orange-400 to-yellow-500 h-4 rounded-full transition-all duration-500 ease-out" style={{ width: `${progress}%` }} />
-          </div>
+          <div className="w-full bg-gray-700 rounded-full h-4 overflow-hidden border border-gray-600"><div className="bg-gradient-to-r from-orange-400 to-yellow-500 h-4 rounded-full transition-all duration-500 ease-out" style={{ width: `${progress}%` }} /></div>
           <span className="text-xs font-medium text-yellow-200 w-8 text-right">{progress}%</span>
         </div>
         <div className="shrink-0 bg-black/30 backdrop-blur-sm p-2 rounded-full shadow"><Image src="/game/book.svg" alt="Scenario Log" width={28} height={28} /></div>
@@ -333,21 +339,11 @@ export default function NarrativeGamePage() {
 
       {/* Main Content Area */}
       <div className="flex-grow flex flex-col overflow-hidden pt-16">
-        {/* Character Image Area */}
+        {/* Character Image Area (Keep debugging helpers) */}
         <div className="relative flex-shrink-0 h-[35vh] md:h-[40vh] w-full flex justify-center items-end pointer-events-none">
-          {/* Debugging Log */}
-          {/* {mainCharacterImage && console.log('Rendering main character image:', mainCharacterImage)} */}
+           {/* {mainCharacterImage && console.log('Rendering main character image with state value:', mainCharacterImage)} */}
           {mainCharacterImage && (
-            <Image
-              key={mainCharacterImage} // Re-render on change
-              src={mainCharacterImage} // e.g., /game/characters/ali.png
-              alt="Current Character"
-              width={250} height={400}
-              className="object-contain max-h-full animate-fade-in"
-              priority
-              onError={(e) => console.error(`Error loading image: ${mainCharacterImage}`, (e.target as HTMLImageElement).src)}
-              unoptimized={process.env.NODE_ENV === 'development'} // Helps bypass Next.js optimization in dev
-            />
+            <Image key={mainCharacterImage} src={mainCharacterImage} alt="Character" width={250} height={400} className="object-contain max-h-full animate-fade-in" priority onError={(e) => console.error(`IMAGE LOAD ERROR: ${mainCharacterImage}`, (e.target as HTMLImageElement).src)} unoptimized={process.env.NODE_ENV === 'development'} />
           )}
         </div>
 
@@ -355,101 +351,53 @@ export default function NarrativeGamePage() {
         <div className="flex-grow overflow-y-auto p-4 space-y-3 scrollbar-thin scrollbar-thumb-gray-400 scrollbar-track-transparent mb-2">
           {staggeredMessages.map((msg) => (
             <div key={msg.id} className={`flex items-end gap-2 ${msg.character === "User" ? "justify-end" : "justify-start"}`}>
-              {msg.character !== "User" && msg.pfp && (
-                <div className="w-8 h-8 md:w-10 md:h-10 rounded-full overflow-hidden shrink-0 shadow border border-white/20 mb-1 self-start">
-                  <Image src={msg.pfp} alt={`${msg.character} pfp`} width={40} height={40} className="object-cover"/>
-                </div>
-              )}
+              {msg.character !== "User" && msg.pfp && ( <div className="w-8 h-8 md:w-10 md:h-10 rounded-full overflow-hidden shrink-0 shadow border border-white/20 mb-1 self-start"> <Image src={msg.pfp} alt={`${msg.character} pfp`} width={40} height={40} className="object-cover"/> </div> )}
               {msg.character === "User" && <div className="w-8 md:w-10 shrink-0"></div>}
-              <div className={`max-w-[75%] md:max-w-[65%] px-3 py-2 rounded-xl shadow-md transition-colors duration-300 ${
-                  msg.character === "User" ? "bg-blue-600 text-white rounded-br-none"
-                  : msg.isTyping ? "bg-gray-300 text-gray-600 rounded-bl-none"
-                  : "bg-white/90 text-gray-900 rounded-bl-none" }`}
-                 style={{ border: msg.character !== "User" && !msg.isTyping ? '1px solid #e5e7eb' : 'none', backgroundColor: msg.character === "User" ? '#2563eb' : (msg.isTyping ? '#D1D5DB' : '#f9fafb'), color: msg.character === "User" ? '#ffffff' : (msg.isTyping ? '#4B5563' : '#1f2937'), }}>
+              <div className={`max-w-[75%] md:max-w-[65%] px-3 py-2 rounded-xl shadow-md transition-colors duration-300 ${ msg.character === "User" ? "bg-blue-600 text-white rounded-br-none" : msg.isTyping ? "bg-gray-300 text-gray-600 rounded-bl-none" : "bg-white/90 text-gray-900 rounded-bl-none" }`} style={{ border: msg.character !== "User" && !msg.isTyping ? '1px solid #e5e7eb' : 'none', backgroundColor: msg.character === "User" ? '#2563eb' : (msg.isTyping ? '#D1D5DB' : '#f9fafb'), color: msg.character === "User" ? '#ffffff' : (msg.isTyping ? '#4B5563' : '#1f2937'), }}>
                 {msg.character !== "User" && !msg.isTyping && (<p className="text-xs font-semibold mb-0.5 text-indigo-700">{msg.character}</p>)}
                 <p className={`text-sm leading-relaxed break-words ${msg.isTyping ? 'animate-pulse' : ''}`}>{msg.text}</p>
               </div>
             </div>
           ))}
-           {isLoadingApi && !isInitialLoading && (
-                <div className="flex items-end gap-2 justify-start">
-                   <div className="w-8 h-8 md:w-10 md:h-10 rounded-full shrink-0 bg-gray-300 animate-pulse"></div>
-                   <div className="max-w-[75%] md:max-w-[65%] px-3 py-2 rounded-xl shadow-md bg-gray-300 rounded-bl-none">
-                       <span className="animate-pulse text-sm text-gray-500">...</span>
-                   </div>
-                </div>
-           )}
+           {isLoadingApi && !isInitialLoading && ( <div className="flex items-end gap-2 justify-start"><div className="w-8 h-8 md:w-10 md:h-10 rounded-full shrink-0 bg-gray-300 animate-pulse"></div><div className="max-w-[75%] md:max-w-[65%] px-3 py-2 rounded-xl shadow-md bg-gray-300 rounded-bl-none"><span className="animate-pulse text-sm text-gray-500">...</span></div></div> )}
           <div ref={messagesEndRef} />
         </div>
 
-        {/* Interaction Area */}
+        {/* Interaction Area (Using refined visibility flags) */}
         <div className={`relative p-3 bg-black/20 backdrop-blur-sm border-t border-white/10 shrink-0 min-h-[100px] flex flex-col justify-center transition-opacity duration-300 ${showInteractionArea ? 'opacity-100' : 'opacity-0 pointer-events-none'}`}>
-
             {/* Decision Point Options */}
-            {isShowingDecisionOptions && currentStepData?.decisionPoint && (
-                <div className="w-full max-w-lg mx-auto animate-fade-in">
-                    <p className="font-semibold text-sm mb-3 text-center text-white">{currentStepData.decisionPoint.question}</p>
-                    {/* Check for exactly 4 options */}
-                    {currentStepData.decisionPoint.options?.length === 4 ? (
-                        <>
-                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 mb-3">
-                                {currentStepData.decisionPoint.options.map((opt, idx) => (
-                                    <button key={idx} onClick={() => handleSelectDecisionOption(idx)} className={`p-2.5 rounded-lg border-2 text-sm text-left transition-all duration-150 ${ selectedDecisionOption === idx ? 'border-yellow-400 bg-yellow-400/20 shadow-lg scale-105 text-yellow-100 ring-2 ring-yellow-300' : 'border-gray-400 bg-white/70 hover:bg-white/90 text-gray-800 hover:border-gray-500' }`} >
-                                        {opt.text} {/* Renders text property */}
-                                    </button>
-                                ))}
-                            </div>
-                            <button onClick={submitDecision} disabled={selectedDecisionOption === null || isLoadingApi || isDisplayingMessages} className="w-full px-4 py-2 bg-gradient-to-r from-green-500 to-emerald-600 text-white rounded-lg text-sm font-bold hover:from-green-600 hover:to-emerald-700 disabled:opacity-50 disabled:cursor-not-allowed shadow-lg transform hover:scale-102 transition-transform" >
-                                Confirm Choice
-                            </button>
-                        </>
-                    ) : (
-                         <p className="text-center text-red-400 text-sm">Error: Invalid number of decision options ({currentStepData.decisionPoint.options?.length || 0} received).</p>
-                    )}
-                </div>
-            )}
+            {isShowingDecisionOptions && currentStepData?.decisionPoint && ( <div className="w-full max-w-lg mx-auto animate-fade-in"> <p className="font-semibold text-sm mb-3 text-center text-white">{currentStepData.decisionPoint.question}</p> {currentStepData.decisionPoint.options?.length === 4 ? (<> <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 mb-3"> {currentStepData.decisionPoint.options.map((opt, idx) => ( <button key={idx} onClick={() => handleSelectDecisionOption(idx)} className={`p-2.5 rounded-lg border-2 text-sm text-left transition-all duration-150 ${ selectedDecisionOption === idx ? 'border-yellow-400 bg-yellow-400/20 shadow-lg scale-105 text-yellow-100 ring-2 ring-yellow-300' : 'border-gray-400 bg-white/70 hover:bg-white/90 text-gray-800 hover:border-gray-500' }`} > {opt.text} </button> ))} </div> <button onClick={submitDecision} disabled={selectedDecisionOption === null || isLoadingApi || isDisplayingMessages} className="w-full px-4 py-2 bg-gradient-to-r from-green-500 to-emerald-600 text-white rounded-lg text-sm font-bold hover:from-green-600 hover:to-emerald-700 disabled:opacity-50 disabled:cursor-not-allowed shadow-lg transform hover:scale-102 transition-transform" > Confirm Choice </button> </> ) : ( <p className="text-center text-red-400 text-sm">Error: Invalid number of decision options ({currentStepData.decisionPoint.options?.length || 0} received).</p> )} </div> )}
 
              {/* Final MCQ Options */}
-            {isShowingMcqOptions && currentStepData?.mcq && (
-                <div className="w-full max-w-lg mx-auto animate-fade-in">
-                    <p className="font-semibold text-sm mb-3 text-center text-white">{currentStepData.mcq.question}</p>
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 mb-3">
-                    {currentStepData.mcq.options.map((opt, idx) => ( // opt is expected to be a string
-                         <button key={idx} onClick={() => handleSelectMcqOption(idx)} className={`p-2.5 rounded-lg border-2 text-sm text-left transition-all duration-150 ${ selectedMcqOption === idx ? 'border-cyan-400 bg-cyan-400/20 shadow-lg scale-105 text-cyan-100 ring-2 ring-cyan-300' : 'border-gray-400 bg-white/70 hover:bg-white/90 text-gray-800 hover:border-gray-500' }`} >
-                            {opt} {/* Render string directly */}
-                        </button>
-                    ))}
-                    </div>
-                    <button onClick={submitMcqAnswer} disabled={selectedMcqOption === null || isLoadingApi || isDisplayingMessages} className="w-full px-4 py-2 bg-gradient-to-r from-blue-500 to-indigo-600 text-white rounded-lg text-sm font-bold hover:from-blue-600 hover:to-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed shadow-lg transform hover:scale-102 transition-transform" >
-                        Submit Answer
-                    </button>
-                </div>
-            )}
+            {isShowingMcqOptions && currentStepData?.mcq && ( <div className="w-full max-w-lg mx-auto animate-fade-in"> <p className="font-semibold text-sm mb-3 text-center text-white">{currentStepData.mcq.question}</p> <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 mb-3"> {currentStepData.mcq.options.map((opt, idx) => ( <button key={idx} onClick={() => handleSelectMcqOption(idx)} className={`p-2.5 rounded-lg border-2 text-sm text-left transition-all duration-150 ${ selectedMcqOption === idx ? 'border-cyan-400 bg-cyan-400/20 shadow-lg scale-105 text-cyan-100 ring-2 ring-cyan-300' : 'border-gray-400 bg-white/70 hover:bg-white/90 text-gray-800 hover:border-gray-500' }`} > {opt} </button> ))} </div> <button onClick={submitMcqAnswer} disabled={selectedMcqOption === null || isLoadingApi || isDisplayingMessages} className="w-full px-4 py-2 bg-gradient-to-r from-blue-500 to-indigo-600 text-white rounded-lg text-sm font-bold hover:from-blue-600 hover:to-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed shadow-lg transform hover:scale-102 transition-transform" > Submit Answer </button> </div> )}
 
              {/* Feedback Display */}
              {isShowingFeedback && currentStepData?.feedback && currentStepData?.mcq && (
                  <div className="text-sm text-center max-w-lg mx-auto animate-fade-in">
                     {selectedMcqOption === currentStepData.mcq.correctOptionIndex ? ( <p className="font-medium mb-3 p-2 rounded border bg-green-700/80 border-green-500 text-green-100"> <strong>Correct!</strong> {currentStepData.feedback.correctFeedback} </p> )
                     : ( <p className="font-medium mb-3 p-2 rounded border bg-red-700/80 border-red-500 text-red-100"> <strong>Incorrect.</strong> {currentStepData.feedback.incorrectFeedback} </p> )}
+                    {/* Show completion button *after* feedback if scenario is also complete */}
+                    {isComplete && (
+                         <button onClick={handleEndScenario} className="mt-2 px-6 py-2 bg-gradient-to-r from-purple-500 to-pink-600 text-white rounded-lg text-sm font-bold hover:from-purple-600 hover:to-pink-700 shadow-lg transform hover:scale-105 transition-transform" >
+                            Return to Dashboard
+                         </button>
+                    )}
                  </div>
              )}
 
-            {/* Scenario Completion Message */}
+            {/* Scenario Completion Message (Handles case where completion happens without feedback step) */}
             {isShowingCompletion && (
                  <div className="text-center max-w-lg mx-auto animate-fade-in">
                     <p className="font-semibold text-lg text-yellow-300 mb-4">Scenario Complete!</p>
-                    {currentStepData?.narrativeSteps && currentStepData.narrativeSteps.length > 0 && !currentStepData.feedback && (
-                        <p className="text-white mb-4 text-sm">{currentStepData.narrativeSteps[0].text}</p> // Show potential final message
-                    )}
+                    {currentStepData?.narrativeSteps && currentStepData.narrativeSteps.length > 0 && ( <p className="text-white mb-4 text-sm">{currentStepData.narrativeSteps[0].text}</p> )}
                     <button onClick={handleEndScenario} className="px-6 py-2 bg-gradient-to-r from-purple-500 to-pink-600 text-white rounded-lg text-sm font-bold hover:from-purple-600 hover:to-pink-700 shadow-lg transform hover:scale-105 transition-transform" >
                        Return to Dashboard
                     </button>
                  </div>
             )}
-
-        </div> {/* End Interaction Area */}
-      </div> {/* End Main Content Area */}
-    </div> // End Main container
+            
+        </div>
+      </div>
+    </div>
   );
 }
-
