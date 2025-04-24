@@ -34,8 +34,12 @@ interface DisplayMessage {
   // isTyping?: boolean; // Removed
 }
 
+// TODO:
+// Change to on click instead of narrative delay (remove). Have "setting of scne" pop up like star wars / once upon a time popup dialog. to set the setting 
+// finish figma format matching
+// 1 goal, 2 scenarios (arrays), 3KC's (array) 
 // --- Constants ---
-const NARRATIVE_STEP_DELAY_MS = 1800; // Slightly increased delay to compensate for no typing indicator
+const NARRATIVE_STEP_DELAY_MS = 4200; // Slightly increased delay to compensate for no typing indicator
 
 // --- Helper Function to Map Character Name to Image Path ---
 const getCharacterImagePath = (characterName: string | null): string | null => {
