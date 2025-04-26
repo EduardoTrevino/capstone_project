@@ -155,6 +155,7 @@ export async function POST(req: NextRequest) {
     const systemPrompt = `
 You are a scenario generator for an educational game. The player is "${userName}".
 The current learning goal is "${goalName}". Goal Description: "${goalDescription}".
+Note: The player already knows who the characters are so they do not need to introduce themselves. 
 
 Scenario Characters & Assets:
 - Rani Singh: pfp=/game/character_pfp/rani.png, image=/game/characters/rani.png
