@@ -376,7 +376,7 @@ export default function NarrativeGamePage() {
         {/* Integrate the new progress bar */}
         <DecisionProgressBar currentStep={progressBarCurrentStep} />
         <div className="shrink-0 bg-black/30 p-2 rounded-full shadow cursor-pointer hover:bg-black/50 transition-colors" data-interactive="true">
-          <Image src="/game/book.svg" alt="Scenario Log" width={28} height={28} />
+          <Image src="/game/book.png" alt="Scenario Log" width={28} height={28} />
         </div>
       </div>
 
