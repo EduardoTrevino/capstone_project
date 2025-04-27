@@ -26,14 +26,21 @@ interface DecisionProgressBarProps {
   }>
 }
 
+// UPDATED default steps to reflect 3 decisions + 1 MCQ
+const defaultSteps = [
+  { label: "Decision 1" },
+  { label: "Decision 2" },
+  { label: "Decision 3" },
+  { label: "MCQ" }, // Changed "Done" to "MCQ"
+];
+
 export default function DecisionProgressBar({
   currentStep = 1,
-  steps = [{ label: "Decision 1" }, { label: "Decision 2" }, { label: "Decision 3" }, { label: "Done" }],
+  steps = defaultSteps, // Use the updated default
 }: DecisionProgressBarProps) {
   return (
-    // Removed the outer container div to allow better integration into the top bar
-    // You might need to adjust styling in the parent component where this is used
-    <div className="flex flex-grow gap-2 items-center bg-black/30 p-2 rounded-lg shadow">
+    // REMOVED bg-black/30, p-2, rounded-lg, shadow from this div
+    <div className="flex flex-grow gap-4 items-center"> {/* Increased gap slightly */}
         {steps.map((step, index) => {
           let status: "completed" | "current" | "upcoming"
 
@@ -49,7 +56,6 @@ export default function DecisionProgressBar({
           return (
             <React.Fragment key={index}>
               <ProgressStep label={step.label} status={status} />
-              {/* No need for extra spacer div as gap-2 on parent handles it */}
             </React.Fragment>
           )
         })}
