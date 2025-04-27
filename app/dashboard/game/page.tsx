@@ -65,9 +65,9 @@ export default function NarrativeGamePage() {
   const [selectedMcqOption, setSelectedMcqOption] = useState<number | null>(null);
   const [hasAnsweredMcq, setHasAnsweredMcq] = useState(false);
   const [userId, setUserId] = useState<string>("");
-  // const [progress, setProgress] = useState(0); // Removed - progress derived for new bar
-  const [decisionCount, setDecisionCount] = useState(0);
+  const [decisionCount, setDecisionCount] = useState(0); // Tracks how many decisions the *user* has made
   const [isComplete, setIsComplete] = useState(false);
+  const [isMcqStepActive, setIsMcqStepActive] = useState(false); // Track if the current step *is* the MCQ step
 
   // --- Refs ---
   const messagesEndRef = useRef<null | HTMLDivElement>(null);
@@ -88,6 +88,8 @@ export default function NarrativeGamePage() {
     setUserId(storedUserId);
     setStaggeredMessages([]);
     setIsInitialLoading(true);
+    setDecisionCount(0); // Reset decision count on load
+    setIsMcqStepActive(false); // Reset MCQ flag
     loadScenarioStep(null, storedUserId);
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [router]);
@@ -106,11 +108,12 @@ export default function NarrativeGamePage() {
     } else if (currentStepData.narrativeSteps?.[0]) {
        stepImage = getCharacterImagePath(currentStepData.narrativeSteps[0].character);
     }
-    // Only update if it's truly different or initially null
     if (stepImage !== mainCharacterImage) {
        setMainCharacterImage(stepImage);
     }
 
+    // Check if this step is the MCQ step
+    setIsMcqStepActive(!!currentStepData.mcq);
 
     // Remember MCQ and reset related states if needed
     if (currentStepData.mcq) {
@@ -128,14 +131,12 @@ export default function NarrativeGamePage() {
     // Queue narrative steps
     if (currentStepData.narrativeSteps?.length > 0) {
       setMessageQueue([...currentStepData.narrativeSteps]);
-      // Interaction area remains hidden, waiting for screen clicks
     } else {
-      // No narrative steps: Show interactions immediately
       setMessageQueue([]);
+      // Show interactions immediately if no narrative
       if (currentStepData.decisionPoint || currentStepData.mcq || currentStepData.feedback || currentStepData.scenarioComplete) {
-          // Show feedback only if MCQ was answered OR if it's the only interaction
           if (currentStepData.feedback && !hasAnsweredMcq && currentStepData.mcq) {
-              // Don't show feedback yet if MCQ hasn't been answered
+              // Don't show feedback yet
           } else {
               setShowInteractionArea(true);
           }
@@ -154,8 +155,6 @@ export default function NarrativeGamePage() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentStepData, isLoadingApi]); // Rerun when new step data arrives
 
-  // Update progress bar - REMOVED useEffect for old progress calculation
-
   // Auto-scroll chat
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -163,7 +162,7 @@ export default function NarrativeGamePage() {
 
   // --- Core Logic Functions ---
 
-  // Fetch Scenario Step
+  // Fetch Scenario Step (No changes needed here for UI)
   const loadScenarioStep = useCallback(async (decisionIndex: number | null, uid: string) => {
     if (!uid) {
       setError("User ID is missing.");
@@ -172,11 +171,8 @@ export default function NarrativeGamePage() {
     }
     setIsLoadingApi(true);
     setError(null);
-    setShowInteractionArea(false); // Hide interactions during load
-    setMessageQueue([]); // Clear queue explicitly
-
-    // Keep user's response message if applicable
-    // Note: We append new messages, so history is preserved naturally.
+    setShowInteractionArea(false);
+    setMessageQueue([]);
 
     try {
       const res = await fetch("/api/lessons", {
@@ -192,12 +188,18 @@ export default function NarrativeGamePage() {
       const data = JSON.parse(responseText);
       if (data.error) throw new Error(data.error);
 
-      // Reset MCQ answered state ONLY when loading based on a *decision* response
-      // OR when initiating the first step (where decisionIndex is null but it's not an MCQ answer submission)
-      const isMcqAnswerSubmission = lastMcqRef.current && !data.scenarioStep.feedback && decisionIndex === null;
-      if (decisionIndex !== null || (decisionIndex === null && !isMcqAnswerSubmission)) {
+      // --- Determine if the *previous* step was an MCQ submission ---
+      // We need to know if the user *just* answered the MCQ to avoid resetting hasAnsweredMcq
+      // Let's infer this: If decisionIndex is null AND the previous step had an MCQ (lastMcqRef.current is set)
+      // AND the new step doesn't have feedback yet (implying it's the step *right after* answering) - this logic is tricky.
+      // Simpler approach: Reset hasAnsweredMcq *unless* the incoming step contains feedback.
+      if (!data.scenarioStep.feedback) {
           setHasAnsweredMcq(false);
           setSelectedMcqOption(null);
+      }
+      // If it's feedback, ensure hasAnsweredMcq remains true if it was already true
+      else if (data.scenarioStep.feedback) {
+          setHasAnsweredMcq(true);
       }
 
 
@@ -210,36 +212,29 @@ export default function NarrativeGamePage() {
       setIsLoadingApi(false);
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [userId]); // Depend only on userId (it shouldn't change often)
+  }, [userId]);
 
-  // Advance narrative or show interaction area
+  // Advance narrative or show interaction area (No changes needed here for UI)
    const handleNextStep = useCallback(() => {
-    if (isLoadingApi || messageQueue.length === 0) return; // Exit if loading or queue empty
+    if (isLoadingApi || messageQueue.length === 0) return;
 
     setMessageQueue(prevQueue => {
         const queue = [...prevQueue];
-        const nextMessageToShow = queue.shift(); // Get next message
+        const nextMessageToShow = queue.shift();
 
         if (nextMessageToShow) {
-            // Update character image if needed - only if mainCharacterImage isn't explicitly set in step data
             const stepImageProvided = currentStepData?.mainCharacterImage?.startsWith('/');
             if (!stepImageProvided) {
                 const charImage = getCharacterImagePath(nextMessageToShow.character);
-                // Check if different from *current* main image before setting
                 setMainCharacterImage(prevMainImage => {
                     if (charImage !== prevMainImage) return charImage;
                     return prevMainImage;
                 });
             }
 
-            // Add message to display
-             // *** Check for duplicates before adding ***
             setStaggeredMessages(prev => {
-                // Simple check: don't add if the very last message has the same text and character
-                // (This is a basic check, might need refinement if identical messages are valid)
                 const lastMsg = prev[prev.length - 1];
                 if (lastMsg && lastMsg.text === nextMessageToShow.text && lastMsg.character === nextMessageToShow.character && !lastMsg.isDecision) {
-                    console.warn("Potential duplicate message prevented:", nextMessageToShow.text);
                     return prev;
                 }
                 return [...prev, {
@@ -251,50 +246,43 @@ export default function NarrativeGamePage() {
                 }];
             });
 
-            // If this was the *last* message, show interactions immediately after render
             if (queue.length === 0 && currentStepData && (currentStepData.decisionPoint || currentStepData.mcq || currentStepData.feedback || currentStepData.scenarioComplete)) {
-                 // Show feedback only if MCQ was answered OR if it's the only interaction
                  if (currentStepData.feedback && !hasAnsweredMcq && currentStepData.mcq) {
-                    // Don't show feedback yet
+                     // Don't show feedback yet
                  } else {
-                     // Use timeout 0 to ensure state update happens *after* this render cycle
                      setTimeout(() => setShowInteractionArea(true), 0);
                  }
             } else {
-                 setShowInteractionArea(false); // Ensure interactions stay hidden
+                 setShowInteractionArea(false);
             }
 
-            return queue; // Return updated queue
+            return queue;
         }
-        return queue; // Return queue (should be empty if no message found)
+        return queue;
     });
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isLoadingApi, messageQueue, currentStepData, hasAnsweredMcq]); // Removed mainCharacterImage dependency
+  }, [isLoadingApi, messageQueue, currentStepData, hasAnsweredMcq]);
 
-   // --- NEW: Screen Click Handler ---
+   // Screen Click Handler (No changes needed here for UI)
    const handleScreenClick = useCallback((event: React.MouseEvent<HTMLDivElement>) => {
-       // Prevent advancing if click is on specific interactive elements (buttons, links etc)
-       // The stopPropagation on the interaction area handles most cases.
-       // Add more specific checks here if needed (e.g., based on target element type)
        const target = event.target as HTMLElement;
-       if (target.closest('button, a, [data-interactive="true"]')) { // Added example data attribute
+       if (target.closest('button, a, [data-interactive="true"]')) {
            return;
        }
-
-       // Only advance narrative if messages are queued and interaction area isn't already shown
        if (!isLoadingApi && messageQueue.length > 0 && !showInteractionArea) {
            handleNextStep();
        }
    }, [isLoadingApi, messageQueue, showInteractionArea, handleNextStep]);
 
 
-  // --- Interaction Handlers (Mostly Unchanged) ---
+  // --- Interaction Handlers ---
 
   function handleSelectDecisionOption(index: number) {
     if (isLoadingApi || !showInteractionArea) return;
     setSelectedDecisionOption(index);
   }
 
+  // SUBMIT DECISION: Increment decisionCount here
   async function submitDecision() {
     if (selectedDecisionOption === null || !userId || isLoadingApi) return;
     const decisionIndexToSubmit = selectedDecisionOption;
@@ -303,7 +291,7 @@ export default function NarrativeGamePage() {
     setStaggeredMessages(prev => [...prev, {
       id: messageIdCounter.current++, character: "User", pfp: null, text: `I choose: "${choiceText}"`, isDecision: true
     }]);
-    setDecisionCount(c => c + 1); // Increment decision count
+    setDecisionCount(c => c + 1); // <-- Increment user decision count
     setSelectedDecisionOption(null);
     setShowInteractionArea(false);
     await loadScenarioStep(decisionIndexToSubmit, userId);
@@ -314,6 +302,7 @@ export default function NarrativeGamePage() {
     setSelectedMcqOption(index);
   }
 
+  // SUBMIT MCQ: Set hasAnsweredMcq here
   async function submitMcqAnswer() {
     if (selectedMcqOption === null || !userId || isLoadingApi || hasAnsweredMcq) return;
     const answerText = currentStepData?.mcq?.options[selectedMcqOption] || '';
@@ -321,11 +310,9 @@ export default function NarrativeGamePage() {
     setStaggeredMessages(prev => [...prev, {
       id: messageIdCounter.current++, character: "User", pfp: null, text: `My answer: "${answerText}"`, isDecision: true
     }]);
-    setHasAnsweredMcq(true); // Set *before* loading next step
-    // Don't reset selectedMcqOption here, needed for feedback check
+    setHasAnsweredMcq(true); // <-- Mark MCQ as answered
     setShowInteractionArea(false);
-    // API call: Pass null for decisionIndex to indicate MCQ answer submission
-    await loadScenarioStep(null, userId); // Load next step (feedback/completion)
+    await loadScenarioStep(null, userId); // Load feedback/completion step
   }
 
   function handleEndScenario() {
@@ -333,17 +320,26 @@ export default function NarrativeGamePage() {
   }
 
   // --- Visibility Flags ---
-  // Interaction area container is visible ONLY when showInteractionArea is true
+  // Note: These flags determine if the *options* are shown, not the question text itself
   const isShowingDecisionOpt = showInteractionArea && currentStepData?.decisionPoint && !hasAnsweredMcq && !isComplete;
   const isShowingMcqOpt      = showInteractionArea && currentStepData?.mcq && !hasAnsweredMcq && !isComplete;
   const isShowingFeedback    = showInteractionArea && currentStepData?.feedback && hasAnsweredMcq;
-  const isShowingCompletion  = showInteractionArea && isComplete && !isShowingFeedback; // Show completion last
+  const isShowingCompletion  = showInteractionArea && isComplete && !isShowingFeedback;
 
-  // --- Calculate currentStep for new ProgressBar ---
-  // Map decisionCount (0, 1, 2, 3) to progress bar steps (1, 2, 3, 4)
-  // The "Done" step (step 4) should become active after the 3rd decision is made.
-  // If MCQ is answered or scenario is complete, it should definitely be step 4.
-  const progressBarCurrentStep = Math.min(4, decisionCount + 1);
+  // --- Calculate currentStep for new ProgressBar (4 steps: D1, D2, D3, MCQ) ---
+  // Step 1: Before D1 (decisionCount = 0)
+  // Step 2: After D1, Before D2 (decisionCount = 1)
+  // Step 3: After D2, Before D3 (decisionCount = 2)
+  // Step 4: After D3 (MCQ stage) OR answered MCQ OR complete (decisionCount = 3 OR hasAnsweredMcq OR isComplete)
+  let progressBarCurrentStep = 1;
+  if (decisionCount === 1) {
+    progressBarCurrentStep = 2;
+  } else if (decisionCount === 2) {
+    progressBarCurrentStep = 3;
+  } else if (decisionCount >= 3 || isMcqStepActive || hasAnsweredMcq || isComplete) {
+      // If user made 3 decisions OR we are on the MCQ step OR MCQ is answered OR scenario complete -> Mark step 4 (MCQ) as active/done
+      progressBarCurrentStep = 4;
+  }
 
 
   // --- Render ---
@@ -371,23 +367,25 @@ export default function NarrativeGamePage() {
       className="relative w-full h-screen flex flex-col overflow-hidden bg-gray-800"
       style={{ backgroundImage: `url(/game/bgs/bg_1.png)`, backgroundSize: 'cover', backgroundPosition: 'center' }}>
 
-      {/* Top Bar - MODIFIED to use DecisionProgressBar */}
-      <div className="absolute top-0 left-0 right-0 z-20 p-3 flex items-center gap-4 backdrop-blur-sm bg-black/10">
+      {/* Top Bar - REMOVED blur and background */}
+      <div className="absolute top-0 left-0 right-0 z-20 p-3 flex items-center gap-4">
         {/* Integrate the new progress bar */}
         <DecisionProgressBar currentStep={progressBarCurrentStep} />
-        <div className="shrink-0 bg-black/30 p-2 rounded-full shadow cursor-pointer hover:bg-black/50 transition-colors" data-interactive="true">
+         {/* Book Icon - REMOVED background */}
+        <div className="shrink-0 p-2 rounded-full cursor-pointer hover:bg-white/20 transition-colors" data-interactive="true">
           <Image src="/game/book.png" alt="Scenario Log" width={28} height={28} />
         </div>
       </div>
 
-      {/* --- Main Content Area (Character + Chat + Interaction) - LAYOUT SWAPPED --- */}
+      {/* --- Main Content Area --- ADDED 'relative' for absolute positioning of question */}
       <div
-        className="flex-grow flex flex-col overflow-hidden pt-16 md:pt-20 cursor-pointer" // Added cursor-pointer
-        onClick={handleScreenClick} // Attach screen click handler here
+        className="relative flex-grow flex flex-col overflow-hidden pt-16 md:pt-20 cursor-pointer"
+        onClick={handleScreenClick}
       >
 
-        {/* --- Chat History & Interaction Area (MOVED UP) --- */}
+        {/* --- Chat History --- */}
         <div className="flex-grow overflow-y-auto p-3 md:p-4 space-y-3 scrollbar-thin scrollbar-thumb-gray-400/50 scrollbar-track-transparent mb-2">
+          {/* Chat bubble rendering unchanged */}
           {staggeredMessages.map(msg => (
             <div key={msg.id} className={`flex items-end gap-2 ${msg.character === "User" ? "justify-end" : "justify-start"} animate-fade-in-short`}>
               {msg.character !== "User" && msg.pfp && ( <div className="w-8 h-8 md:w-10 md:h-10 rounded-full overflow-hidden shrink-0 shadow border border-white/20 mb-1 self-start"> <Image src={msg.pfp} alt={`${msg.character} pfp`} width={40} height={40} className="object-cover"/> </div> )}
@@ -402,70 +400,82 @@ export default function NarrativeGamePage() {
           <div ref={messagesEndRef} />
         </div>
 
-        {/* --- Interaction Area Container (MOVED UP, logically follows chat) --- */}
+         {/* --- Interaction Area Container --- */}
+         {/* REMOVED original background/blur. */}
+         {/* Added min-h-[150px] or similar to give space for absolutely positioned question */}
         <div
-           className={`relative p-3 bg-black/40 backdrop-blur-lg border-t border-white/10
-                       shrink-0 min-h-[90px] md:min-h-[100px] flex flex-col justify-center items-center
+           className={`relative p-3
+                       shrink-0 min-h-[150px] md:min-h-[180px] flex flex-col justify-end items-center
                        transition-opacity duration-300 ease-in-out ${
-                       showInteractionArea ? "opacity-100" : "opacity-0 pointer-events-none" // Only visible when true
+                       showInteractionArea ? "opacity-100" : "opacity-0 pointer-events-none"
                        }`}
-           onClick={(e) => e.stopPropagation()} // Prevent clicks here triggering screen click
-           style={{ cursor: 'default' }} // Reset cursor for this area
-           data-interactive="true" // Mark this whole block as interactive
+           onClick={(e) => e.stopPropagation()}
+           style={{ cursor: 'default' }}
+           data-interactive="true"
         >
-           {/* --- REMOVED "Next" button --- */}
+            {/* Options / Feedback Container - ADDED translucent background here */}
+            <div className={`w-full max-w-xl mx-auto space-y-3 p-4 rounded-lg ${ (isShowingDecisionOpt || isShowingMcqOpt || isShowingFeedback || isShowingCompletion) ? 'bg-black/60 backdrop-blur-sm' : '' } `}>
+              {/* Decision Point Options */}
+              {isShowingDecisionOpt && currentStepData?.decisionPoint && (
+                <>
+                  {/* Options Grid */}
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                    {currentStepData.decisionPoint.options.map((opt, idx) => ( <button key={idx} onClick={() => handleSelectDecisionOption(idx)} className={`p-2.5 rounded-lg border-2 text-sm text-left transition-all duration-150 ease-in-out w-full focus:outline-none ${selectedDecisionOption === idx ? "border-yellow-400 bg-yellow-500/30 shadow-lg scale-[1.03] text-yellow-100 ring-2 ring-yellow-300/70" : "border-gray-400 bg-white/70 hover:bg-white/90 text-gray-800 hover:border-gray-500 hover:scale-[1.02]"}`}>{opt.text}</button> ))}
+                  </div>
+                  {/* Confirm Button */}
+                  <button onClick={submitDecision} disabled={selectedDecisionOption === null || isLoadingApi} className="w-full mt-2 px-4 py-2 bg-gradient-to-r from-green-500 to-emerald-600 text-white rounded-lg text-sm font-bold hover:from-green-600 hover:to-emerald-700 focus:outline-none focus:ring-2 focus:ring-green-500 focus:ring-opacity-50 disabled:opacity-60 disabled:cursor-not-allowed disabled:scale-100 disabled:hover:from-green-500 shadow-lg transform hover:scale-[1.03] transition-all duration-150 ease-in-out">Confirm Choice</button>
+                </>
+              )}
 
-          {/* Decision Point Options */}
-          {isShowingDecisionOpt && currentStepData?.decisionPoint && (
-             <div className="w-full max-w-xl mx-auto animate-fade-in space-y-3">
-              <p className="font-semibold text-sm mb-2 text-center text-white px-4">{currentStepData.decisionPoint.question}</p>
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                {currentStepData.decisionPoint.options.map((opt, idx) => ( <button key={idx} onClick={() => handleSelectDecisionOption(idx)} className={`p-2.5 rounded-lg border-2 text-sm text-left transition-all duration-150 ease-in-out w-full focus:outline-none ${selectedDecisionOption === idx ? "border-yellow-400 bg-yellow-500/30 shadow-lg scale-[1.03] text-yellow-100 ring-2 ring-yellow-300/70" : "border-gray-400 bg-white/70 hover:bg-white/90 text-gray-800 hover:border-gray-500 hover:scale-[1.02]"}`}>{opt.text}</button> ))}
-              </div>
-              <button onClick={submitDecision} disabled={selectedDecisionOption === null || isLoadingApi} className="w-full mt-2 px-4 py-2 bg-gradient-to-r from-green-500 to-emerald-600 text-white rounded-lg text-sm font-bold hover:from-green-600 hover:to-emerald-700 focus:outline-none focus:ring-2 focus:ring-green-500 focus:ring-opacity-50 disabled:opacity-60 disabled:cursor-not-allowed disabled:scale-100 disabled:hover:from-green-500 shadow-lg transform hover:scale-[1.03] transition-all duration-150 ease-in-out">Confirm Choice</button>
-             </div>
-          )}
+              {/* MCQ Options */}
+              {isShowingMcqOpt && currentStepData?.mcq && (
+                <>
+                  {/* Options Grid */}
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                    {currentStepData.mcq.options.map((opt, idx) => ( <button key={idx} onClick={() => handleSelectMcqOption(idx)} className={`p-2.5 rounded-lg border-2 text-sm text-left transition-all duration-150 ease-in-out w-full focus:outline-none ${selectedMcqOption === idx ? "border-cyan-400 bg-cyan-500/30 shadow-lg scale-[1.03] text-cyan-100 ring-2 ring-cyan-300/70" : "border-gray-400 bg-white/70 hover:bg-white/90 text-gray-800 hover:border-gray-500 hover:scale-[1.02]"}`}>{opt}</button> ))}
+                  </div>
+                  {/* Submit Button */}
+                  <button onClick={submitMcqAnswer} disabled={selectedMcqOption === null || isLoadingApi} className="w-full mt-2 px-4 py-2 bg-gradient-to-r from-blue-500 to-indigo-600 text-white rounded-lg text-sm font-bold hover:from-blue-600 hover:to-indigo-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-opacity-50 disabled:opacity-60 disabled:cursor-not-allowed disabled:scale-100 disabled:hover:from-blue-500 shadow-lg transform hover:scale-[1.03] transition-all duration-150 ease-in-out">Submit Answer</button>
+                </>
+              )}
 
-          {/* MCQ Options */}
-          {isShowingMcqOpt && currentStepData?.mcq && (
-             <div className="w-full max-w-xl mx-auto animate-fade-in space-y-3">
-               <p className="font-semibold text-sm mb-2 text-center text-white px-4">{currentStepData.mcq.question}</p>
-               <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                 {currentStepData.mcq.options.map((opt, idx) => ( <button key={idx} onClick={() => handleSelectMcqOption(idx)} className={`p-2.5 rounded-lg border-2 text-sm text-left transition-all duration-150 ease-in-out w-full focus:outline-none ${selectedMcqOption === idx ? "border-cyan-400 bg-cyan-500/30 shadow-lg scale-[1.03] text-cyan-100 ring-2 ring-cyan-300/70" : "border-gray-400 bg-white/70 hover:bg-white/90 text-gray-800 hover:border-gray-500 hover:scale-[1.02]"}`}>{opt}</button> ))}
-               </div>
-               <button onClick={submitMcqAnswer} disabled={selectedMcqOption === null || isLoadingApi} className="w-full mt-2 px-4 py-2 bg-gradient-to-r from-blue-500 to-indigo-600 text-white rounded-lg text-sm font-bold hover:from-blue-600 hover:to-indigo-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-opacity-50 disabled:opacity-60 disabled:cursor-not-allowed disabled:scale-100 disabled:hover:from-blue-500 shadow-lg transform hover:scale-[1.03] transition-all duration-150 ease-in-out">Submit Answer</button>
-             </div>
-          )}
+              {/* Feedback Display */}
+              {isShowingFeedback && currentStepData?.feedback && lastMcqRef.current && (
+                <div className="text-sm text-center animate-fade-in w-full">
+                  {selectedMcqOption === lastMcqRef.current.correctOptionIndex ? ( <div className="font-medium mb-3 p-3 rounded-lg border bg-green-800/80 border-green-600 text-green-100 shadow-md"> <strong className="block text-base mb-1">Correct!</strong> {currentStepData.feedback.correctFeedback} </div> ) : ( <div className="font-medium mb-3 p-3 rounded-lg border bg-red-800/80 border-red-600 text-red-100 shadow-md"> <strong className="block text-base mb-1">Incorrect.</strong> {currentStepData.feedback.incorrectFeedback} {typeof lastMcqRef.current.correctOptionIndex === 'number' && (<span className="block mt-2 text-xs text-red-200 opacity-90">(Correct Answer: "{lastMcqRef.current.options[lastMcqRef.current.correctOptionIndex]}")</span>)} </div> )}
+                  {isComplete && ( <button onClick={handleEndScenario} className="mt-2 px-6 py-2 bg-gradient-to-r from-purple-500 to-pink-600 text-white rounded-lg text-sm font-bold hover:from-purple-600 hover:to-pink-700 focus:outline-none focus:ring-2 focus:ring-purple-500 focus:ring-opacity-50 shadow-lg transform hover:scale-105 transition-all duration-150 ease-in-out">Finish Scenario</button> )}
+                </div>
+              )}
 
-          {/* Feedback Display */}
-          {isShowingFeedback && currentStepData?.feedback && lastMcqRef.current && (
-            <div className="text-sm text-center max-w-lg mx-auto animate-fade-in w-full px-4">
-              {selectedMcqOption === lastMcqRef.current.correctOptionIndex ? ( <div className="font-medium mb-3 p-3 rounded-lg border bg-green-800/80 border-green-600 text-green-100 shadow-md"> <strong className="block text-base mb-1">Correct!</strong> {currentStepData.feedback.correctFeedback} </div> ) : ( <div className="font-medium mb-3 p-3 rounded-lg border bg-red-800/80 border-red-600 text-red-100 shadow-md"> <strong className="block text-base mb-1">Incorrect.</strong> {currentStepData.feedback.incorrectFeedback} {typeof lastMcqRef.current.correctOptionIndex === 'number' && (<span className="block mt-2 text-xs text-red-200 opacity-90">(Correct Answer: "{lastMcqRef.current.options[lastMcqRef.current.correctOptionIndex]}")</span>)} </div> )}
-              {/* Show finish button directly after feedback if scenario is complete */}
-              {isComplete && ( <button onClick={handleEndScenario} className="mt-2 px-6 py-2 bg-gradient-to-r from-purple-500 to-pink-600 text-white rounded-lg text-sm font-bold hover:from-purple-600 hover:to-pink-700 focus:outline-none focus:ring-2 focus:ring-purple-500 focus:ring-opacity-50 shadow-lg transform hover:scale-105 transition-all duration-150 ease-in-out">Finish Scenario</button> )}
-               {/* Removed the "Click 'Next' to continue" hint as screen click handles it */}
-            </div>
-          )}
-
-          {/* Scenario Completion Message (Only shown if NOT showing feedback) */}
-          {isShowingCompletion && (
-            <div className="text-center max-w-lg mx-auto animate-fade-in w-full px-4">
-              <p className="font-semibold text-lg text-yellow-300 mb-4 drop-shadow">Scenario Complete!</p>
-              <button onClick={handleEndScenario} className="px-8 py-2.5 bg-gradient-to-r from-purple-500 to-pink-600 text-white rounded-lg text-sm font-bold hover:from-purple-600 hover:to-pink-700 focus:outline-none focus:ring-2 focus:ring-purple-500 focus:ring-opacity-50 shadow-lg transform hover:scale-105 transition-all duration-150 ease-in-out">Return to Dashboard</button>
-            </div>
-          )}
+              {/* Scenario Completion Message */}
+              {isShowingCompletion && (
+                <div className="text-center animate-fade-in w-full">
+                  <p className="font-semibold text-lg text-yellow-300 mb-4 drop-shadow">Scenario Complete!</p>
+                  <button onClick={handleEndScenario} className="px-8 py-2.5 bg-gradient-to-r from-purple-500 to-pink-600 text-white rounded-lg text-sm font-bold hover:from-purple-600 hover:to-pink-700 focus:outline-none focus:ring-2 focus:ring-purple-500 focus:ring-opacity-50 shadow-lg transform hover:scale-105 transition-all duration-150 ease-in-out">Return to Dashboard</button>
+                </div>
+              )}
+            </div> {/* End Options/Feedback Container */}
 
         </div> {/* End Interaction Area */}
 
-        {/* --- Character Image Area (MOVED DOWN) --- */}
-        {/* Added mt-4 for spacing, removed mb-2 */}
-        <div className="relative flex-shrink-0 h-[35vh] md:h-[40vh] flex justify-center items-end pointer-events-none mt-4">
+        {/* --- Character Image Area --- */}
+        {/* Increased height slightly, adjusted margin */}
+        <div className="relative flex-shrink-0 h-[40vh] md:h-[45vh] flex justify-center items-end pointer-events-none mt-[-40px] mb-4 z-0"> {/* Negative margin to pull it up slightly */}
           {mainCharacterImage && (
             <Image key={mainCharacterImage} src={mainCharacterImage} alt="Current Character" width={250} height={400} className="object-contain max-h-full animate-fade-in drop-shadow-lg" priority />
           )}
         </div>
 
-      </div> {/* --- End Main Content Area (now clickable) --- */}
+        {/* --- ABSOLUTELY POSITIONED QUESTION TEXT --- */}
+        {/* Shown only when Decision or MCQ options are visible */}
+        {(isShowingDecisionOpt || isShowingMcqOpt) && (
+            <p className="absolute bottom-[160px] md:bottom-[190px] left-1/2 transform -translate-x-1/2 w-full max-w-xl px-6 pointer-events-none z-10 text-center font-semibold text-base text-white [text-shadow:0_1px_3px_rgba(0,0,0,0.7)] animate-fade-in">
+              {isShowingDecisionOpt && currentStepData?.decisionPoint?.question}
+              {isShowingMcqOpt && currentStepData?.mcq?.question}
+            </p>
+        )}
+
+      </div> {/* --- End Main Content Area --- */}
 
     </div> // End Page Container
   );
