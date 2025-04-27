@@ -362,29 +362,27 @@ export default function NarrativeGamePage() {
      return ( <div className="flex items-center justify-center min-h-screen bg-gray-900 text-white text-xl font-semibold"> Loading Scenario... </div> );
    }
 
-  return (
+   return (
     <div
       className="relative w-full h-screen flex flex-col overflow-hidden bg-gray-800"
       style={{ backgroundImage: `url(/game/bgs/bg_1.png)`, backgroundSize: 'cover', backgroundPosition: 'center' }}>
 
-      {/* Top Bar - REMOVED blur and background */}
+      {/* Top Bar (Unchanged) */}
       <div className="absolute top-0 left-0 right-0 z-20 p-3 flex items-center gap-4">
-        {/* Integrate the new progress bar */}
         <DecisionProgressBar currentStep={progressBarCurrentStep} />
-         {/* Book Icon - REMOVED background */}
         <div className="shrink-0 p-2 rounded-full cursor-pointer hover:bg-white/20 transition-colors" data-interactive="true">
           <Image src="/game/book.png" alt="Scenario Log" width={28} height={28} />
         </div>
       </div>
 
-      {/* --- Main Content Area --- ADDED 'relative' for absolute positioning of question */}
+      {/* --- Main Content Area --- 'relative' is important for absolute children */}
       <div
         className="relative flex-grow flex flex-col overflow-hidden pt-16 md:pt-20 cursor-pointer"
         onClick={handleScreenClick}
       >
 
-        {/* --- Chat History --- */}
-        <div className="flex-grow overflow-y-auto p-3 md:p-4 space-y-3 scrollbar-thin scrollbar-thumb-gray-400/50 scrollbar-track-transparent mb-2">
+        {/* --- Chat History --- Adjusted padding-bottom */}
+        <div className="flex-grow overflow-y-auto p-3 md:p-4 space-y-3 scrollbar-thin scrollbar-thumb-gray-400/50 scrollbar-track-transparent pb-40 md:pb-48"> {/* Increased padding-bottom */}
           {/* Chat bubble rendering unchanged */}
           {staggeredMessages.map(msg => (
             <div key={msg.id} className={`flex items-end gap-2 ${msg.character === "User" ? "justify-end" : "justify-start"} animate-fade-in-short`}>
@@ -400,12 +398,17 @@ export default function NarrativeGamePage() {
           <div ref={messagesEndRef} />
         </div>
 
-         {/* --- Interaction Area Container --- */}
-         {/* REMOVED original background/blur. */}
-         {/* Added min-h-[150px] or similar to give space for absolutely positioned question */}
+        {/* --- Character Image Area --- Positioned normally, will be overlapped */}
+        {/* Removed negative margin and z-index */}
+        <div className="absolute bottom-0 left-0 right-0 flex-shrink-0 h-[40vh] md:h-[45vh] flex justify-center items-end pointer-events-none mb-4">
+          {mainCharacterImage && (
+            <Image key={mainCharacterImage} src={mainCharacterImage} alt="Current Character" width={250} height={400} className="object-contain max-h-full animate-fade-in drop-shadow-lg" priority />
+          )}
+        </div>
+
+        {/* --- Interaction Area Container --- POSITIONED ABSOLUTELY AT BOTTOM */}
         <div
-           className={`relative p-3
-                       shrink-0 min-h-[150px] md:min-h-[180px] flex flex-col justify-end items-center
+           className={`absolute bottom-0 left-0 right-0 p-3 z-10 flex flex-col justify-end items-center
                        transition-opacity duration-300 ease-in-out ${
                        showInteractionArea ? "opacity-100" : "opacity-0 pointer-events-none"
                        }`}
@@ -413,11 +416,17 @@ export default function NarrativeGamePage() {
            style={{ cursor: 'default' }}
            data-interactive="true"
         >
-            {/* Options / Feedback Container - ADDED translucent background here */}
-            <div className={`w-full max-w-xl mx-auto space-y-3 p-4 rounded-lg ${ (isShowingDecisionOpt || isShowingMcqOpt || isShowingFeedback || isShowingCompletion) ? 'bg-black/60 backdrop-blur-sm' : '' } `}>
+            {/* Options / Feedback Container - With translucent background */}
+            {/* Moved Question Text INSIDE this container */}
+            <div className={`w-full max-w-xl mx-auto space-y-3 p-4 rounded-lg bg-black/60 backdrop-blur-sm `}>
+
               {/* Decision Point Options */}
               {isShowingDecisionOpt && currentStepData?.decisionPoint && (
                 <>
+                  {/* Question Text */}
+                  <p className="font-semibold text-sm mb-3 text-center text-white [text-shadow:0_1px_2px_rgba(0,0,0,0.5)] px-2">
+                    {currentStepData.decisionPoint.question}
+                  </p>
                   {/* Options Grid */}
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                     {currentStepData.decisionPoint.options.map((opt, idx) => ( <button key={idx} onClick={() => handleSelectDecisionOption(idx)} className={`p-2.5 rounded-lg border-2 text-sm text-left transition-all duration-150 ease-in-out w-full focus:outline-none ${selectedDecisionOption === idx ? "border-yellow-400 bg-yellow-500/30 shadow-lg scale-[1.03] text-yellow-100 ring-2 ring-yellow-300/70" : "border-gray-400 bg-white/70 hover:bg-white/90 text-gray-800 hover:border-gray-500 hover:scale-[1.02]"}`}>{opt.text}</button> ))}
@@ -430,6 +439,10 @@ export default function NarrativeGamePage() {
               {/* MCQ Options */}
               {isShowingMcqOpt && currentStepData?.mcq && (
                 <>
+                   {/* Question Text */}
+                  <p className="font-semibold text-sm mb-3 text-center text-white [text-shadow:0_1px_2px_rgba(0,0,0,0.5)] px-2">
+                      {currentStepData.mcq.question}
+                  </p>
                   {/* Options Grid */}
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                     {currentStepData.mcq.options.map((opt, idx) => ( <button key={idx} onClick={() => handleSelectMcqOption(idx)} className={`p-2.5 rounded-lg border-2 text-sm text-left transition-all duration-150 ease-in-out w-full focus:outline-none ${selectedMcqOption === idx ? "border-cyan-400 bg-cyan-500/30 shadow-lg scale-[1.03] text-cyan-100 ring-2 ring-cyan-300/70" : "border-gray-400 bg-white/70 hover:bg-white/90 text-gray-800 hover:border-gray-500 hover:scale-[1.02]"}`}>{opt}</button> ))}
@@ -458,22 +471,7 @@ export default function NarrativeGamePage() {
 
         </div> {/* End Interaction Area */}
 
-        {/* --- Character Image Area --- */}
-        {/* Increased height slightly, adjusted margin */}
-        <div className="relative flex-shrink-0 h-[40vh] md:h-[45vh] flex justify-center items-end pointer-events-none mt-[-40px] mb-4 z-0"> {/* Negative margin to pull it up slightly */}
-          {mainCharacterImage && (
-            <Image key={mainCharacterImage} src={mainCharacterImage} alt="Current Character" width={250} height={400} className="object-contain max-h-full animate-fade-in drop-shadow-lg" priority />
-          )}
-        </div>
-
-        {/* --- ABSOLUTELY POSITIONED QUESTION TEXT --- */}
-        {/* Shown only when Decision or MCQ options are visible */}
-        {(isShowingDecisionOpt || isShowingMcqOpt) && (
-            <p className="absolute bottom-[160px] md:bottom-[190px] left-1/2 transform -translate-x-1/2 w-full max-w-xl px-6 pointer-events-none z-10 text-center font-semibold text-base text-white [text-shadow:0_1px_3px_rgba(0,0,0,0.7)] animate-fade-in">
-              {isShowingDecisionOpt && currentStepData?.decisionPoint?.question}
-              {isShowingMcqOpt && currentStepData?.mcq?.question}
-            </p>
-        )}
+         {/* REMOVED the separate absolutely positioned question text P tag */}
 
       </div> {/* --- End Main Content Area --- */}
 
