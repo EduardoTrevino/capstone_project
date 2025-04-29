@@ -5,6 +5,7 @@ import Image from "next/image";
 import { useRouter } from "next/navigation";
 import React from 'react';
 import DecisionProgressBar from "@/components/DecisionProgressBar";
+import { ChatMessage } from "@/components/ChatMessage";
 
 interface NarrativeDialogue {
   character: "Rani" | "Ali" | "Yash" | "Nisha" | "Narrator";
@@ -125,7 +126,11 @@ export default function NarrativeGamePage() {
 
   // Auto-scroll chat
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+    // Add a slight delay to allow the new ChatMessage component's layout shift
+    const timer = setTimeout(() => {
+        messagesEndRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
+    }, 100); // Adjust delay as needed
+    return () => clearTimeout(timer);
   }, [staggeredMessages]);
 
   // --- Core Logic Functions ---
@@ -164,7 +169,7 @@ export default function NarrativeGamePage() {
       setIsLoadingApi(false);
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [userId]);
+  }, []); // Removed userId dependency as it's passed in
 
   const handleNextStep = useCallback(() => {
     if (isLoadingApi || messageQueue.length === 0) return;
@@ -191,7 +196,8 @@ export default function NarrativeGamePage() {
                 return [...prev, {
                     id: messageIdCounter.current++,
                     character: nextMessageToShow.character,
-                    pfp: nextMessageToShow.pfp,
+                    // Use the pfp from the dialogue step for the message avatar
+                    pfp: nextMessageToShow.pfp, // Ensure API provides this
                     text: nextMessageToShow.text,
                     isDecision: false
                 }];
@@ -208,7 +214,7 @@ export default function NarrativeGamePage() {
         return queue;
     });
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isLoadingApi, messageQueue, currentStepData]);
+  }, [isLoadingApi, messageQueue, currentStepData]); // Removed userId dependency
 
   const handleScreenClick = useCallback((event: React.MouseEvent<HTMLDivElement>) => {
        const target = event.target as HTMLElement;
@@ -230,6 +236,7 @@ export default function NarrativeGamePage() {
     const decisionIndexToSubmit = selectedDecisionOption;
     const choiceText = currentStepData?.decisionPoint?.options[decisionIndexToSubmit]?.text || '';
 
+    // Add user's choice message using the OLD style
     setStaggeredMessages(prev => [...prev, {
       id: messageIdCounter.current++, character: "User", pfp: null, text: `I choose: "${choiceText}"`, isDecision: true
     }]);
@@ -306,22 +313,38 @@ export default function NarrativeGamePage() {
       >
 
         {/* --- Chat History Area --- Grows to fill space ABOVE the bottom area */}
-        <div className="flex-grow overflow-y-auto p-3 md:p-4 space-y-3 scrollbar-thin scrollbar-thumb-gray-400/50 scrollbar-track-transparent"> {/* REMOVED large pb-* */}
-          {/* Chat bubble rendering unchanged */}
+        <div className="flex-grow overflow-y-auto p-3 md:p-4 scrollbar-thin scrollbar-thumb-gray-400/50 scrollbar-track-transparent"> {/* REMOVED space-y-3 */}
           {staggeredMessages.map(msg => (
-            <div key={msg.id} className={`flex items-end gap-2 ${msg.character === "User" ? "justify-end" : "justify-start"} animate-fade-in-short`}>
-              {msg.character !== "User" && msg.pfp && ( <div className="w-8 h-8 md:w-10 md:h-10 rounded-full overflow-hidden shrink-0 shadow border border-white/20 mb-1 self-start"> <Image src={msg.pfp} alt={`${msg.character} pfp`} width={40} height={40} className="object-cover"/> </div> )}
-              {/* Placeholder div for alignment when it's a user message */}
-              {msg.character === "User" && !msg.pfp && <div className="w-8 md:w-10 shrink-0"></div>}
-              <div className={`max-w-[75%] md:max-w-[65%] px-3 py-2 rounded-xl shadow-md ${ msg.character === "User" ? "bg-[#BBD9A1] text-[#214104] rounded-br-none" : "bg-white/95 text-gray-900 rounded-bl-none" }`}>
-                {msg.character !== "User" && (<p className="text-xs font-semibold mb-0.5 text-indigo-700">{msg.character}</p>)}
-                <p className={`text-sm leading-relaxed break-words`}>{msg.text}</p>
+            msg.character === "User" ? (
+              // --- Keep existing User message rendering ---
+              // Added mb-6 to match the new component's bottom margin for consistency
+              <div key={msg.id} className={`flex items-end gap-2 justify-end animate-fade-in-short mb-6`}>
+                {/* Placeholder div */}
+                <div className="w-8 md:w-10 shrink-0"></div>
+                <div className={`max-w-[75%] md:max-w-[65%] px-3 py-2 rounded-xl shadow-md bg-[#BBD9A1] text-[#214104] rounded-br-none`}>
+                  {/* Removed user name display from bubble if it existed */}
+                  <p className={`text-sm leading-relaxed break-words`}>{msg.text}</p>
+                </div>
               </div>
-            </div>
+            ) : (
+              // --- Use new ChatMessage component for AI/Character messages ---
+              <ChatMessage
+                key={msg.id}
+                message={msg.text}
+                name={msg.character}
+                // Ensure pfp is passed, provide empty string as fallback for component's placeholder
+                avatarUrl={msg.pfp || ''}
+                // Let the component handle the fallback text generation (e.g., first letter of name)
+                className="animate-fade-in-short mb-6" // Added mb-6 for consistent spacing with user messages
+              />
+            )
           ))}
+          {/* Loading Indicator (Unchanged) */}
           {isLoadingApi && !isInitialLoading && ( <div className="flex items-center justify-center p-4"> <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-gray-400"></div> <span className="text-sm text-gray-400 italic ml-2">Loading...</span> </div> )}
+          {/* Scroll Target (Unchanged) */}
           <div ref={messagesEndRef} /> {/* Scroll target */}
         </div>
+        {/* ================== END CHAT HISTORY AREA ================== */}
 
         {/* --- Bottom Area (Character Image + Interactions) --- Fixed Height */}
         {/* This container has a fixed height and prevents the chat from flowing into it */}
