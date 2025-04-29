@@ -335,7 +335,7 @@ export default function NarrativeGamePage() {
                 // Ensure pfp is passed, provide empty string as fallback for component's placeholder
                 avatarUrl={msg.pfp || ''}
                 // Let the component handle the fallback text generation (e.g., first letter of name)
-                className="animate-fade-in-short mb-6" // Added mb-6 for consistent spacing with user messages
+                className="animate-fade-in-short mb-16" // Added mb-6 for consistent spacing with user messages
               />
             )
           ))}
