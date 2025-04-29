@@ -328,14 +328,14 @@ export default function NarrativeGamePage() {
         <div className="relative flex-shrink-0 h-[40vh] md:h-[45vh]"> {/* ** NEW CONTAINER ** - `relative` for absolute children, `flex-shrink-0` to prevent shrinking, fixed `h-[]` */}
 
             {/* --- Character Image Area --- Positioned absolutely WITHIN the bottom-area */}
-            <div className="absolute inset-0 flex justify-center items-end pointer-events-none pb-2 md:pb-4"> {/* Use inset-0 to fill parent, adjust padding */}
+            <div className="absolute inset-0 flex justify-start items-end pointer-events-none pb-2 md:pb-4 pl-4"> {/* Changed justify-center to justify-start and added pl-4 */}
               {mainCharacterImage && (
                   <Image
                       key={mainCharacterImage} // Re-trigger animation on image change
                       src={mainCharacterImage}
                       alt="Current Character"
-                      width={250}
-                      height={400}
+                      width={350} // Increased from 250
+                      height={500} // Increased from 400
                       className="object-contain max-h-full animate-fade-in drop-shadow-lg"
                       priority // Load primary character images eagerly
                   />

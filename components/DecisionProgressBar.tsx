@@ -31,7 +31,7 @@ const defaultSteps = [
   { label: "Decision 1" },
   { label: "Decision 2" },
   { label: "Decision 3" },
-  { label: "Finish" }, // Changed "MCQ" to "Finish"
+  // { label: "Finish" }, // Changed "MCQ" to "Finish"
 ];
 
 export default function DecisionProgressBar({
