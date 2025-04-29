@@ -313,7 +313,7 @@ export default function NarrativeGamePage() {
               {msg.character !== "User" && msg.pfp && ( <div className="w-8 h-8 md:w-10 md:h-10 rounded-full overflow-hidden shrink-0 shadow border border-white/20 mb-1 self-start"> <Image src={msg.pfp} alt={`${msg.character} pfp`} width={40} height={40} className="object-cover"/> </div> )}
               {/* Placeholder div for alignment when it's a user message */}
               {msg.character === "User" && !msg.pfp && <div className="w-8 md:w-10 shrink-0"></div>}
-              <div className={`max-w-[75%] md:max-w-[65%] px-3 py-2 rounded-xl shadow-md ${ msg.character === "User" ? "bg-blue-600 text-white rounded-br-none" : "bg-white/95 text-gray-900 rounded-bl-none" }`}>
+              <div className={`max-w-[75%] md:max-w-[65%] px-3 py-2 rounded-xl shadow-md ${ msg.character === "User" ? "bg-[#BBD9A1] text-[#214104] rounded-br-none" : "bg-white/95 text-gray-900 rounded-bl-none" }`}>
                 {msg.character !== "User" && (<p className="text-xs font-semibold mb-0.5 text-indigo-700">{msg.character}</p>)}
                 <p className={`text-sm leading-relaxed break-words`}>{msg.text}</p>
               </div>
