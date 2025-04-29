@@ -39,49 +39,20 @@ const scenarioStepSchema = {
             required: ["text"],
             additionalProperties: false
           },
-          // minItems/maxItems removed from here as per previous fix
         },
       },
       required: ["question", "options"],
       additionalProperties: false,
     },
-    mcq: {
-      type: ["object", "null"],
-      description: "Present only for the final multiple-choice question.",
-      properties: {
-        question: { type: "string" },
-        options: {
-          type: "array",
-          description: "3-4 string options for the MCQ.",
-          items: { type: "string" }, // Options MUST be strings
-          // *** FIX: REMOVED minItems and maxItems from MCQ options ***
-        },
-        correctOptionIndex: { type: "integer", description: "0-based index of the correct option." },
-      },
-      required: ["question", "options", "correctOptionIndex"],
-      additionalProperties: false,
-    },
-    feedback: {
-        type: ["object", "null"],
-        description: "Feedback provided AFTER the user answers the MCQ.",
-        properties: {
-            correctFeedback: { type: "string" },
-            incorrectFeedback: { type: "string" },
-        },
-        required: ["correctFeedback", "incorrectFeedback"],
-        additionalProperties: false,
-    },
     scenarioComplete: {
       type: "boolean",
-      description: "Set to true when the entire scenario (narrative, 3 decisions, MCQ, feedback) is finished.",
+      description: "Set to true when the entire scenario (narrative, 3 decisions) is finished.",
     },
   },
   required: [
     "narrativeSteps",
     "mainCharacterImage",
     "decisionPoint",
-    "mcq",
-    "feedback",
     "scenarioComplete",
   ],
   additionalProperties: false,
@@ -90,43 +61,35 @@ const scenarioStepSchema = {
 // Helper to get current game state from dialogue history
 function getCurrentGameState(history: any[]) {
     let decisionCount = 0;
-    let mcqPresented = false;
-    let mcqAnswered = false;
     let lastDecisionIndex: number | null = null;
-    let lastMcqAnswerIndex: number | null = null;
     let correctedDecisionCount = 0;
 
-    // First pass: Count decisions presented by assistant and check for MCQ/Feedback
+    // First pass: Count decisions presented by assistant
     history.forEach(entry => {
         if (entry.role === 'assistant') {
             try {
                 const stepData = JSON.parse(entry.content);
                 if (stepData.decisionPoint) correctedDecisionCount++;
-                if (stepData.mcq) mcqPresented = true;
-                if (stepData.feedback) mcqAnswered = true; // Feedback means answered
             } catch (e) { /* ignore parse errors */ }
         }
     });
 
-    // Second pass: Correlate user actions for last indices and count user decisions made
+    // Second pass: Correlate user actions for last decision index and count user decisions made
     history.forEach(entry => {
         if (entry.role === 'user') {
             if (entry.content?.includes("chose decision index")) {
                  const match = entry.content.match(/index: (\d+)/);
                  if (match) lastDecisionIndex = parseInt(match[1], 10);
                  decisionCount++; // Count user *actions*
-            } else if (entry.content?.includes("answered MCQ")) { // Check based on log content
-                 mcqAnswered = true; // Mark as answered based on user action too
-                 // Optional: Extract index if needed, but might not be reliable from text
-                 // const match = entry.content.match(/index: (\d+)/);
-                 // if (match) lastMcqAnswerIndex = parseInt(match[1], 10);
             }
         }
     });
 
-    return { decisionCount, mcqPresented, mcqAnswered, lastDecisionIndex, lastMcqAnswerIndex };
+    // Return the count based on *user actions* as it's more reliable for progression
+    // Keep correctedDecisionCount potentially for debugging/validation if needed
+    console.log(`State Check: User Decisions Made = ${decisionCount}, Assistant Decisions Presented = ${correctedDecisionCount}, Last User Choice = ${lastDecisionIndex}`);
+    return { decisionCount, lastDecisionIndex };
 }
-
 
 export async function POST(req: NextRequest) {
   try {
@@ -146,10 +109,8 @@ export async function POST(req: NextRequest) {
     const dialogueHistory = userGoalsRow?.dialogue_history ?? [];
     const previousGameState = getCurrentGameState(dialogueHistory);
     console.log("[/api/lesson] Previous Game State:", previousGameState);
-    const isMcqAnswerSubmission = previousGameState.mcqPresented && !previousGameState.mcqAnswered && decisionIndex === null;
     const currentDecisionCount = previousGameState.decisionCount + (decisionIndex !== null ? 1 : 0);
-    const currentMcqAnswered = previousGameState.mcqAnswered || isMcqAnswerSubmission;
-    console.log(`[/api/lesson] Calculated current state for prompt: Decisions=${currentDecisionCount}, MCQ Answered=${currentMcqAnswered}`)
+    console.log(`[/api/lesson] Calculated current state for prompt: Decisions=${currentDecisionCount}`)
 
     // --- Step 6: Build the dynamic system prompt ---
     const systemPrompt = `
@@ -168,28 +129,24 @@ Scenario Structure & State Tracking:
 1. Start: narrativeSteps + FIRST decisionPoint (count 0->1).
 2. Decision 1->2: narrativeSteps + SECOND decisionPoint (count 1->2).
 3. Decision 2->3: narrativeSteps + THIRD decisionPoint (count 2->3).
-4. Decision 3->MCQ: narrativeSteps + FINAL mcq (count 3).
-5. MCQ->Feedback: feedback + scenarioComplete=true + final narrativeStep.
+4. Decision 3->Conclusion: FINAL narrativeSteps + scenarioComplete=true. No further decisions.
 
 Current State (Reflects state *after* the user's latest action):
 - Decisions made so far (by user): ${currentDecisionCount}
-- MCQ presented in previous step: ${previousGameState.mcqPresented}
-- MCQ answered now (by user): ${currentMcqAnswered}
+${previousGameState.lastDecisionIndex !== null ? `- Previous decision index chosen by user: ${previousGameState.lastDecisionIndex}`: ''}
 ${decisionIndex !== null ? `- User just chose decision option index: ${decisionIndex}` : ''}
-${isMcqAnswerSubmission ? `- User just submitted an answer for the MCQ.` : ''}
 
 Your Task: Generate the JSON for the *next* step based on the 'Current State'.
 
 Instructions:
 - Progression Logic:
-    - If currentDecisionCount < 3 AND previousGameState.mcqPresented == false: Respond with narrativeSteps and the *next* decisionPoint.
-    - If currentDecisionCount == 3 AND previousGameState.mcqPresented == false: Respond with narrativeSteps and the *mcq*.
-    - If previousGameState.mcqPresented == true AND currentMcqAnswered == true: Respond with *feedback* and set scenarioComplete=true. Include a final concluding narrativeStep.
-- Content: Use characters naturally. Dialogue engaging & relevant. Keep segments concise. Paths EXACTLY as specified. Use null for mainCharacterImage if no change.
+    - If currentDecisionCount < 3: Respond with narrativeSteps and the *next* decisionPoint. Ensure decisionPoint is not null. Set scenarioComplete=false.
+    - If currentDecisionCount == 3: Respond with the FINAL concluding narrativeSteps ONLY. Set scenarioComplete=true. Ensure decisionPoint is null.
+- Content: Use characters naturally. Dialogue engaging & relevant. Keep segments concise. Paths EXACTLY as specified. Use null for mainCharacterImage if no change. The final narrative step should provide a sense of closure based on the scenario and path taken.
 - *** CRITICAL SCHEMA ADHERENCE ***:
     - Response MUST be a single valid JSON object matching the provided schema (enforced by \`response_format\`).
-    - Decision Points MUST have exactly 4 options. Each option MUST be an object \`{ "text": "Option text" }\`.
-    - MCQ options MUST be an array of 3 or 4 simple strings, e.g., \`["Opt A", "Opt B", "Opt C"]\`.
+    - Decision Points MUST have exactly 4 options. Each option MUST be an object \`{ "text": "Option text" }\`. decisionPoint MUST be null in the final step.
+    - Remove any reference to 'mcq' or 'feedback' properties in your response.
     - \`narrativeSteps\` should not be empty unless it's the final feedback step.
 - Output: Ensure all required fields are present, using null where appropriate. No extra text outside the JSON.
 `.trim();
@@ -199,7 +156,6 @@ Instructions:
       { role: "system", content: systemPrompt },
       ...(dialogueHistory.length > 0 ? [dialogueHistory[dialogueHistory.length - 1]] : []),
       ...(decisionIndex !== null ? [{ role: "user", content: `User chose decision index: ${decisionIndex}` }]
-          : isMcqAnswerSubmission ? [{ role: "user", content: `User answered MCQ.` }]
           : dialogueHistory.length === 0 ? [{ role: "user", content: "Start the scenario."}] : []),
     ];
     console.log("[/api/lesson] Messages for OpenAI =>", JSON.stringify(messagesForOpenAI, null, 2));
@@ -223,7 +179,6 @@ Instructions:
         const errorText = await response.text();
         console.error("[/api/lesson] OpenAI error response text:", errorText);
         let errorJson; try { errorJson = JSON.parse(errorText); } catch { /* ignore */ }
-        // Return the specific error from OpenAI if possible
         return NextResponse.json({ error: errorJson?.error?.message || `OpenAI API Error: ${response.statusText}` }, { status: response.status });
     }
     const data = await response.json();
@@ -243,14 +198,13 @@ Instructions:
 
     // --- Step 10 & 11: Prepare log entry & Upsert Supabase ---
     const userActionEntry = decisionIndex !== null ? { role: "user", content: `User chose decision index: ${decisionIndex}` }
-         : isMcqAnswerSubmission ? { role: "user", content: `User answered MCQ.` }
          : { role: "user", content: "User initiated scenario or continued." };
     const assistantEntry = { role: "assistant", content };
     const updatedDialogue = [...dialogueHistory];
-    if (decisionIndex !== null || isMcqAnswerSubmission) { updatedDialogue.push(userActionEntry); }
+    if (decisionIndex !== null) { updatedDialogue.push(userActionEntry); }
     updatedDialogue.push(assistantEntry);
     const currentProgressValue = parsedScenarioStep.scenarioComplete ? 100
-        : Math.min(95, 5 + (currentDecisionCount * 25) + (previousGameState.mcqPresented ? 15 : 0) + (currentMcqAnswered ? 5 : 0));
+        : Math.min(95, 5 + (currentDecisionCount * 25));
     const { error: upsertError } = await supabase.from("user_goals").upsert({
         user_id: userId, goal_id: focusedGoalId, dialogue_history: updatedDialogue,
         updated_at: new Date().toISOString(), progress: currentProgressValue,

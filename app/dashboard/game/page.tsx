@@ -1,16 +1,11 @@
-//Todo:
-// Remove MCQ type question
-// fix option selection UI
-
 "use client";
 
 import { useState, useEffect, useRef, useCallback } from "react";
 import Image from "next/image";
 import { useRouter } from "next/navigation";
-import React from 'react'; // Import React for event type
-import DecisionProgressBar from "@/components/DecisionProgressBar"; // Adjust path if needed
+import React from 'react';
+import DecisionProgressBar from "@/components/DecisionProgressBar";
 
-// --- Interfaces (Unchanged) ---
 interface NarrativeDialogue {
   character: "Rani" | "Ali" | "Yash" | "Nisha" | "Narrator";
   pfp: string;
@@ -18,14 +13,10 @@ interface NarrativeDialogue {
 }
 interface DecisionPointOption { text: string; }
 interface DecisionPoint { question: string; options: DecisionPointOption[]; }
-interface MCQ { question: string; options: string[]; correctOptionIndex: number; }
-interface Feedback { correctFeedback: string; incorrectFeedback: string; }
 interface ScenarioStep {
   narrativeSteps: NarrativeDialogue[];
   mainCharacterImage: string | null;
   decisionPoint: DecisionPoint | null;
-  mcq: MCQ | null;
-  feedback: Feedback | null;
   scenarioComplete: boolean;
   error?: string;
 }
@@ -53,7 +44,6 @@ const getCharacterImagePath = (characterName: string | null): string | null => {
     }
 };
 
-
 export default function NarrativeGamePage() {
   const router = useRouter();
 
@@ -67,18 +57,13 @@ export default function NarrativeGamePage() {
   const [isLoadingApi, setIsLoadingApi] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [selectedDecisionOption, setSelectedDecisionOption] = useState<number | null>(null);
-  const [selectedMcqOption, setSelectedMcqOption] = useState<number | null>(null);
-  const [hasAnsweredMcq, setHasAnsweredMcq] = useState(false);
   const [userId, setUserId] = useState<string>("");
-  const [decisionCount, setDecisionCount] = useState(0); // Tracks how many decisions the *user* has made
+  const [decisionCount, setDecisionCount] = useState(0);
   const [isComplete, setIsComplete] = useState(false);
-  const [isMcqStepActive, setIsMcqStepActive] = useState(false); // Track if the current step *is* the MCQ step
 
   // --- Refs ---
   const messagesEndRef = useRef<null | HTMLDivElement>(null);
   const messageIdCounter = useRef(0);
-  const lastMcqRef = useRef<MCQ | null>(null);
-
 
   // --- Effects ---
 
@@ -93,8 +78,7 @@ export default function NarrativeGamePage() {
     setUserId(storedUserId);
     setStaggeredMessages([]);
     setIsInitialLoading(true);
-    setDecisionCount(0); // Reset decision count on load
-    setIsMcqStepActive(false); // Reset MCQ flag
+    setDecisionCount(0);
     loadScenarioStep(null, storedUserId);
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [router]);
@@ -103,67 +87,41 @@ export default function NarrativeGamePage() {
   useEffect(() => {
     if (!currentStepData || isLoadingApi) return;
 
-    setShowInteractionArea(false); // Default to hidden
+    setShowInteractionArea(false);
     setIsInitialLoading(false);
 
-    // Set main character image (using the helper)
     let stepImage = null;
     if (currentStepData.mainCharacterImage?.startsWith('/')) {
-        // If an explicit path is provided, use it
         stepImage = currentStepData.mainCharacterImage;
     } else if (currentStepData.narrativeSteps?.[0]) {
-       // Otherwise, try to map from the first character in the narrative steps
        stepImage = getCharacterImagePath(currentStepData.narrativeSteps[0].character);
     }
-    // Only update state if the image actually changes
     if (stepImage !== mainCharacterImage) {
        setMainCharacterImage(stepImage);
     }
 
-
-    // Check if this step is the MCQ step
-    setIsMcqStepActive(!!currentStepData.mcq);
-
-    // Remember MCQ and reset related states if needed
-    if (currentStepData.mcq) {
-      lastMcqRef.current = currentStepData.mcq;
-      // Only reset if it's a *new* MCQ step, not feedback following an MCQ
-      if (!currentStepData.feedback) {
-        setHasAnsweredMcq(false);
-        setSelectedMcqOption(null);
-      }
-    }
     if (currentStepData.decisionPoint) {
         setSelectedDecisionOption(null);
     }
 
-    // Queue narrative steps
     if (currentStepData.narrativeSteps?.length > 0) {
       setMessageQueue([...currentStepData.narrativeSteps]);
     } else {
       setMessageQueue([]);
-      // Show interactions immediately if no narrative
-      if (currentStepData.decisionPoint || currentStepData.mcq || currentStepData.feedback || currentStepData.scenarioComplete) {
-          if (currentStepData.feedback && !hasAnsweredMcq && currentStepData.mcq) {
-              // Don't show feedback yet if MCQ hasn't been answered
-          } else {
-              // Delay showing slightly to allow potential image fade-in
-              setTimeout(() => setShowInteractionArea(true), 50);
-          }
+      if (currentStepData.decisionPoint || currentStepData.scenarioComplete) {
+          setTimeout(() => setShowInteractionArea(true), 50);
       }
     }
 
-    // Update completion status
     if (currentStepData.scenarioComplete) {
       setIsComplete(true);
     }
-     // Handle error state from API response
     if (currentStepData.error) {
       setError(currentStepData.error);
     }
 
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [currentStepData, isLoadingApi]); // Rerun when new step data arrives
+  }, [currentStepData, isLoadingApi]);
 
   // Auto-scroll chat
   useEffect(() => {
@@ -172,7 +130,6 @@ export default function NarrativeGamePage() {
 
   // --- Core Logic Functions ---
 
-  // Fetch Scenario Step (No changes needed here for UI)
   const loadScenarioStep = useCallback(async (decisionIndex: number | null, uid: string) => {
     if (!uid) {
       setError("User ID is missing.");
@@ -181,8 +138,8 @@ export default function NarrativeGamePage() {
     }
     setIsLoadingApi(true);
     setError(null);
-    setShowInteractionArea(false); // Hide interaction area while loading new step
-    setMessageQueue([]); // Clear any remaining message queue from previous step
+    setShowInteractionArea(false);
+    setMessageQueue([]);
 
     try {
       const res = await fetch("/api/lessons", {
@@ -198,17 +155,6 @@ export default function NarrativeGamePage() {
       const data = JSON.parse(responseText);
       if (data.error) throw new Error(data.error);
 
-      // Reset MCQ answered state *unless* the incoming step specifically includes feedback
-      // This handles the transition from answering MCQ -> seeing feedback correctly
-      if (!data.scenarioStep.feedback) {
-          setHasAnsweredMcq(false);
-          setSelectedMcqOption(null); // Also reset selected option if not feedback
-      } else if (data.scenarioStep.feedback) {
-          // If feedback is present, ensure we *keep* the answered state
-          // (This mainly handles edge cases or reloads on feedback steps)
-          setHasAnsweredMcq(true);
-      }
-
       setCurrentStepData(data.scenarioStep);
     } catch (err: any) {
       console.error("loadScenarioStep error:", err);
@@ -218,9 +164,8 @@ export default function NarrativeGamePage() {
       setIsLoadingApi(false);
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [userId]); // userId dependency is okay here
+  }, [userId]);
 
-  // Advance narrative or show interaction area
   const handleNextStep = useCallback(() => {
     if (isLoadingApi || messageQueue.length === 0) return;
 
@@ -229,137 +174,88 @@ export default function NarrativeGamePage() {
         const nextMessageToShow = queue.shift();
 
         if (nextMessageToShow) {
-            // Check if the main character image is explicitly set for the step
             const stepImageProvided = currentStepData?.mainCharacterImage?.startsWith('/');
-            // Only update the image based on the narrative character if no step image is provided
             if (!stepImageProvided) {
                 const charImage = getCharacterImagePath(nextMessageToShow.character);
-                 // Update main character image if it's different from the current one
                 setMainCharacterImage(prevMainImage => {
                     if (charImage !== prevMainImage) return charImage;
                     return prevMainImage;
                 });
             }
 
-            // Add message to display list
             setStaggeredMessages(prev => {
-                // Basic duplicate check to prevent accidental double adds on fast clicks
                 const lastMsg = prev[prev.length - 1];
                 if (lastMsg && lastMsg.text === nextMessageToShow.text && lastMsg.character === nextMessageToShow.character && !lastMsg.isDecision) {
-                    return prev; // Avoid adding duplicate narrative message
+                    return prev;
                 }
                 return [...prev, {
                     id: messageIdCounter.current++,
                     character: nextMessageToShow.character,
-                    pfp: nextMessageToShow.pfp, // Assuming pfp comes from the NarrativeDialogue
+                    pfp: nextMessageToShow.pfp,
                     text: nextMessageToShow.text,
                     isDecision: false
                 }];
             });
 
-            // If the queue is now empty, check if we should show interactions
-            if (queue.length === 0 && currentStepData && (currentStepData.decisionPoint || currentStepData.mcq || currentStepData.feedback || currentStepData.scenarioComplete)) {
-                 // Don't show feedback interaction area until MCQ is answered
-                 if (currentStepData.feedback && !hasAnsweredMcq && currentStepData.mcq) {
-                     // Do nothing, wait for MCQ submission
-                 } else {
-                     // Use setTimeout to ensure state updates propagate before showing
-                     setTimeout(() => setShowInteractionArea(true), 0);
-                 }
-            } else {
-                 // Keep interaction area hidden if there are more messages
+            if (queue.length === 0 && currentStepData && (currentStepData.decisionPoint || currentStepData.scenarioComplete)) {
+                 setTimeout(() => setShowInteractionArea(true), 0);
+            } else if (queue.length > 0) {
                  setShowInteractionArea(false);
             }
 
-            return queue; // Return the updated queue
+            return queue;
         }
-        return queue; // Return original queue if no message was shifted
+        return queue;
     });
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isLoadingApi, messageQueue, currentStepData, hasAnsweredMcq]); // Dependencies look correct
+  }, [isLoadingApi, messageQueue, currentStepData]);
 
-   // Screen Click Handler
-   const handleScreenClick = useCallback((event: React.MouseEvent<HTMLDivElement>) => {
-       // Prevent advancing narrative if clicking on interactive elements
+  const handleScreenClick = useCallback((event: React.MouseEvent<HTMLDivElement>) => {
        const target = event.target as HTMLElement;
        if (target.closest('button, a, [data-interactive="true"]')) {
            return;
        }
-       // Advance narrative only if API isn't loading, there are messages, and interaction area isn't shown
        if (!isLoadingApi && messageQueue.length > 0 && !showInteractionArea) {
            handleNextStep();
        }
    }, [isLoadingApi, messageQueue, showInteractionArea, handleNextStep]);
-
-
-  // --- Interaction Handlers ---
 
   function handleSelectDecisionOption(index: number) {
     if (isLoadingApi || !showInteractionArea) return;
     setSelectedDecisionOption(index);
   }
 
-  // SUBMIT DECISION: Increment decisionCount here
   async function submitDecision() {
     if (selectedDecisionOption === null || !userId || isLoadingApi) return;
     const decisionIndexToSubmit = selectedDecisionOption;
     const choiceText = currentStepData?.decisionPoint?.options[decisionIndexToSubmit]?.text || '';
 
-    // Add user choice to chat history
     setStaggeredMessages(prev => [...prev, {
       id: messageIdCounter.current++, character: "User", pfp: null, text: `I choose: "${choiceText}"`, isDecision: true
     }]);
-    setDecisionCount(c => c + 1); // <-- Increment user decision count
-    setSelectedDecisionOption(null); // Reset selection
-    setShowInteractionArea(false); // Hide options
-    await loadScenarioStep(decisionIndexToSubmit, userId); // Load next step based on decision
-  }
-
-  function handleSelectMcqOption(index: number) {
-    if (isLoadingApi || !showInteractionArea || hasAnsweredMcq) return; // Prevent selection if already answered
-    setSelectedMcqOption(index);
-  }
-
-  // SUBMIT MCQ: Set hasAnsweredMcq here
-  async function submitMcqAnswer() {
-    if (selectedMcqOption === null || !userId || isLoadingApi || hasAnsweredMcq) return;
-    const answerText = currentStepData?.mcq?.options[selectedMcqOption] || '';
-
-    // Add user answer to chat history
-    setStaggeredMessages(prev => [...prev, {
-      id: messageIdCounter.current++, character: "User", pfp: null, text: `My answer: "${answerText}"`, isDecision: true
-    }]);
-    setHasAnsweredMcq(true); // <-- Mark MCQ as answered
-    setShowInteractionArea(false); // Hide options immediately
-    // Reset selected option visually *after* marking as answered but *before* loading next step
-    setSelectedMcqOption(null);
-    await loadScenarioStep(null, userId); // Load feedback/completion step (decisionIndex is null for MCQ feedback)
+    setDecisionCount(c => c + 1);
+    setSelectedDecisionOption(null);
+    setShowInteractionArea(false);
+    await loadScenarioStep(decisionIndexToSubmit, userId);
   }
 
   function handleEndScenario() {
-    router.push("/dashboard"); // Or wherever the user should go after completion
+    router.push("/dashboard");
   }
 
   // --- Visibility Flags ---
-  // Note: These flags determine if the *options* are shown, not the question text itself
-  const isShowingDecisionOpt = showInteractionArea && currentStepData?.decisionPoint && !hasAnsweredMcq && !isComplete;
-  const isShowingMcqOpt      = showInteractionArea && currentStepData?.mcq && !hasAnsweredMcq && !isComplete;
-  // Show feedback ONLY if the feedback exists AND the MCQ has been answered
-  const isShowingFeedback    = showInteractionArea && currentStepData?.feedback && hasAnsweredMcq;
-  // Show completion ONLY if scenario is complete AND we are NOT showing feedback (feedback takes priority if both are true)
-  const isShowingCompletion  = showInteractionArea && isComplete && !isShowingFeedback;
+  const isShowingDecisionOpt = showInteractionArea && currentStepData?.decisionPoint && !isComplete;
+  const isShowingCompletion = showInteractionArea && isComplete;
 
-   // --- Calculate currentStep for new ProgressBar (4 steps: D1, D2, D3, MCQ) ---
+  // --- Calculate currentStep for new ProgressBar (4 steps: D1, D2, D3, Finish) ---
   let progressBarCurrentStep = 1;
   if (decisionCount === 1) {
     progressBarCurrentStep = 2;
   } else if (decisionCount === 2) {
     progressBarCurrentStep = 3;
-  } else if (decisionCount >= 3 || isMcqStepActive || hasAnsweredMcq || isComplete) {
-      // If user made 3 decisions OR we are on the MCQ step OR MCQ is answered OR scenario complete -> Mark step 4 (MCQ) as active/done
-      progressBarCurrentStep = 4;
+  } else if (decisionCount >= 3 || isComplete) {
+    progressBarCurrentStep = 4;
   }
-
 
   // --- Render ---
 
@@ -475,52 +371,7 @@ export default function NarrativeGamePage() {
                     </>
                   )}
 
-                  {/* MCQ Options */}
-                  {isShowingMcqOpt && currentStepData?.mcq && (
-                    <>
-                       {/* Question Text */}
-                      <p className="font-semibold text-sm mb-3 text-center text-white [text-shadow:0_1px_2px_rgba(0,0,0,0.5)] px-2">
-                          {currentStepData.mcq.question}
-                      </p>
-                      {/* Options Grid */}
-                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                        {currentStepData.mcq.options.map((opt, idx) => ( <button key={idx} onClick={() => handleSelectMcqOption(idx)} className={`p-2.5 rounded-lg border-2 text-sm text-left transition-all duration-150 ease-in-out w-full focus:outline-none ${selectedMcqOption === idx ? "border-cyan-400 bg-cyan-500/30 shadow-lg scale-[1.03] text-cyan-100 ring-2 ring-cyan-300/70" : "border-gray-400 bg-white/70 hover:bg-white/90 text-gray-800 hover:border-gray-500 hover:scale-[1.02]"}`}>{opt}</button> ))}
-                      </div>
-                      {/* Submit Button */}
-                      <button onClick={submitMcqAnswer} disabled={selectedMcqOption === null || isLoadingApi} className="w-full mt-2 px-4 py-2 bg-gradient-to-r from-blue-500 to-indigo-600 text-white rounded-lg text-sm font-bold hover:from-blue-600 hover:to-indigo-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-opacity-50 disabled:opacity-60 disabled:cursor-not-allowed disabled:scale-100 disabled:hover:from-blue-500 shadow-lg transform hover:scale-[1.03] transition-all duration-150 ease-in-out">Submit Answer</button>
-                    </>
-                  )}
-
-                  {/* Feedback Display */}
-                  {isShowingFeedback && currentStepData?.feedback && lastMcqRef.current && (
-                    <div className="text-sm text-center animate-fade-in w-full">
-                       {/* Check if selectedMcqOption matches the correct index from the *remembered* MCQ */}
-                      {selectedMcqOption === lastMcqRef.current.correctOptionIndex ? (
-                         <div className="font-medium mb-3 p-3 rounded-lg border bg-green-800/80 border-green-600 text-green-100 shadow-md">
-                            <strong className="block text-base mb-1">Correct!</strong> {currentStepData.feedback.correctFeedback}
-                         </div>
-                     ) : (
-                         <div className="font-medium mb-3 p-3 rounded-lg border bg-red-800/80 border-red-600 text-red-100 shadow-md">
-                            <strong className="block text-base mb-1">Incorrect.</strong> {currentStepData.feedback.incorrectFeedback}
-                            {/* Safely access the correct answer text using the remembered MCQ */}
-                            {typeof lastMcqRef.current.correctOptionIndex === 'number' && lastMcqRef.current.options[lastMcqRef.current.correctOptionIndex] && (
-                                <span className="block mt-2 text-xs text-red-200 opacity-90">
-                                    (Correct Answer: "{lastMcqRef.current.options[lastMcqRef.current.correctOptionIndex]}")
-                                </span>
-                            )}
-                         </div>
-                     )}
-                      {/* Show Finish button only if the scenario is complete AND we are showing feedback */}
-                      {isComplete && (
-                         <button onClick={handleEndScenario} className="mt-2 px-6 py-2 bg-gradient-to-r from-purple-500 to-pink-600 text-white rounded-lg text-sm font-bold hover:from-purple-600 hover:to-pink-700 focus:outline-none focus:ring-2 focus:ring-purple-500 focus:ring-opacity-50 shadow-lg transform hover:scale-105 transition-all duration-150 ease-in-out">
-                           Finish Scenario
-                         </button>
-                       )}
-                    </div>
-                  )}
-
-
-                  {/* Scenario Completion Message (Only shown if NOT showing feedback) */}
+                  {/* Scenario Completion Message (Only shown if NOT showing decision options) */}
                   {isShowingCompletion && (
                     <div className="text-center animate-fade-in w-full">
                       <p className="font-semibold text-lg text-yellow-300 mb-4 drop-shadow">Scenario Complete!</p>
