@@ -353,7 +353,7 @@ export default function NarrativeGamePage() {
                data-interactive="true" // Mark as interactive for handleScreenClick check
             >
                 {/* Options / Feedback Container - With translucent background */}
-                <div className={`w-full max-w-xl mx-auto space-y-3 p-4 rounded-lg bg-black/60 backdrop-blur-sm shadow-lg`}>
+                <div className={`w-full max-w-xl mx-auto space-y-3 p-4 rounded-lg bg-[#66943C] backdrop-blur-sm shadow-lg`}>
 
                   {/* Decision Point Options */}
                   {isShowingDecisionOpt && currentStepData?.decisionPoint && (
@@ -364,7 +364,7 @@ export default function NarrativeGamePage() {
                       </p>
                       {/* Options Grid */}
                       <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                        {currentStepData.decisionPoint.options.map((opt, idx) => ( <button key={idx} onClick={() => handleSelectDecisionOption(idx)} className={`p-2.5 rounded-lg border-2 text-sm text-left transition-all duration-150 ease-in-out w-full focus:outline-none ${selectedDecisionOption === idx ? "border-yellow-400 bg-yellow-500/30 shadow-lg scale-[1.03] text-yellow-100 ring-2 ring-yellow-300/70" : "border-gray-400 bg-white/70 hover:bg-white/90 text-gray-800 hover:border-gray-500 hover:scale-[1.02]"}`}>{opt.text}</button> ))}
+                        {currentStepData.decisionPoint.options.map((opt, idx) => ( <button key={idx} onClick={() => handleSelectDecisionOption(idx)} className={`p-2.5 rounded-lg border-2 text-sm text-left transition-all duration-150 ease-in-out w-full focus:outline-none ${selectedDecisionOption === idx ? "border-yellow-400 bg-yellow-500/30 shadow-lg scale-[1.03] text-yellow-100 ring-2 ring-yellow-300/70" : "border-gray-400 bg-[#BBD9A1] hover:bg-[#BBD9A1]/90 text-[#214104] hover:border-gray-500 hover:scale-[1.02]"}`}>{opt.text}</button> ))}
                       </div>
                       {/* Confirm Button */}
                       <button onClick={submitDecision} disabled={selectedDecisionOption === null || isLoadingApi} className="w-full mt-2 px-4 py-2 bg-gradient-to-r from-green-500 to-emerald-600 text-white rounded-lg text-sm font-bold hover:from-green-600 hover:to-emerald-700 focus:outline-none focus:ring-2 focus:ring-green-500 focus:ring-opacity-50 disabled:opacity-60 disabled:cursor-not-allowed disabled:scale-100 disabled:hover:from-green-500 shadow-lg transform hover:scale-[1.03] transition-all duration-150 ease-in-out">Confirm Choice</button>
