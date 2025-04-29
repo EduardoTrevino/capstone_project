@@ -8,7 +8,7 @@ import DecisionProgressBar from "@/components/DecisionProgressBar";
 import { ChatMessage } from "@/components/ChatMessage";
 
 interface NarrativeDialogue {
-  character: "Rani" | "Ali" | "Yash" | "Nisha" | "Narrator";
+  character: "Rani" | "Ali" | "Santosh" | "Manju" | "Rajesh" | "Narrator";
   pfp: string;
   text: string;
 }
@@ -36,8 +36,9 @@ const getCharacterImagePath = (characterName: string | null): string | null => {
     switch (characterName.toLowerCase()) {
         case 'rani':      return `${basePath}rani.png`;
         case 'ali':       return `${basePath}ali.png`;
-        case 'yash':      return `${basePath}yash.png`;
-        case 'nisha':     return `${basePath}nisha.png`;
+        case 'santosh':      return `${basePath}santosh.png`;
+        case 'manju':     return `${basePath}manju.png`;
+        case 'rajesh':     return `${basePath}rajesh.png`;
         case 'narrator':  return `${basePath}narrator.png`; // Assuming you might want a narrator image
         default:
             console.warn(`Mapping not found for character image: ${characterName}`);
@@ -335,7 +336,7 @@ export default function NarrativeGamePage() {
                 // Ensure pfp is passed, provide empty string as fallback for component's placeholder
                 avatarUrl={msg.pfp || ''}
                 // Let the component handle the fallback text generation (e.g., first letter of name)
-                className="animate-fade-in-short mb-16" // Added mb-6 for consistent spacing with user messages
+                className="animate-fade-in-short mb-14" // Added mb-6 for consistent spacing with user messages
               />
             )
           ))}

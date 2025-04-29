@@ -119,11 +119,19 @@ The current learning goal is "${goalName}". Goal Description: "${goalDescription
 Note: The player already knows who the characters are so they do not need to introduce themselves. 
 
 Scenario Characters & Assets:
-- Rani Singh: pfp=/game/character_pfp/rani.png, image=/game/characters/rani.png
-- Ali Shetty: pfp=/game/character_pfp/ali.png, image=/game/characters/ali.png
-- Yash Patel: pfp=/game/character_pfp/yash.png, image=/game/characters/yash.png
-- Nisha Kapoor: pfp=/game/character_pfp/nisha.png, image=/game/characters/nisha.png
+- Rani: pfp=/game/character_pfp/rani.png, image=/game/characters/rani.png
+- Ali: pfp=/game/character_pfp/ali.png, image=/game/characters/ali.png
+- Santosh: pfp=/game/character_pfp/santosh.png, image=/game/characters/santosh.png
+- Manju: pfp=/game/character_pfp/manju.png, image=/game/characters/manju.png
+- Rajesh: pfp=/game/character_pfp/rajesh.png, image=/game/characters/rajesh.png
 - Narrator: pfp=/game/character_pfp/narrator.png, image=/game/characters/narrator.png
+
+Scenario Characters:
+- Rani: Enthusiastic Mentor
+- Ali: Apprentice/Partner
+- Manju: Govt. Associate/Investor
+- Rajesh: The Competitor 
+- Narrator: Narrates scenario
 
 Scenario Structure & State Tracking:
 1. Start: narrativeSteps + FIRST decisionPoint (count 0->1).
