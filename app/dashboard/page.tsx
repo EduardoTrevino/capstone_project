@@ -1,242 +1,214 @@
-"use client"
+"use client";
 
-import { useEffect, useState } from "react"
-import { useRouter, usePathname } from "next/navigation"
-import Image from "next/image"
-import { OnboardingTour } from "@/components/onboarding-tour"
-import { supabase } from "@/lib/supabase"
-import { MyLineChart } from "@/components/ui/my-line-chart"
-import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
-import SettingsDialog from "@/components/SettingsDialog" // Updated import path
+/*
+  ============================================================================
+  New unified **Dashboard** page (mobile‑first)
+  ----------------------------------------------------------------------------
+  ‣ Combines the old Dashboard & Goal pages.
+  ‣ Follows the new Figma layout where the focused‑goal progress sits directly
+    underneath the cash counter with an edit‑pencil button that opens the
+    existing <GoalDialog /> component.
+  ‣ All business KPI widgets (Monetary Growth, Customer Satisfaction, Quality
+    & Reputation) use static asset placeholders for now – just swap them for
+    live components when ready.
+  ‣ Numeric values (cash, charts, progress, etc.) are hard‑coded to 0/placeholder
+    until backend wiring is complete.
+  ============================================================================
+*/
 
-export default function Dashboard() {
-  const [username, setUsername] = useState("")
-  const [userId, setUserId] = useState<string | null>(null); 
-  const [avatar, setAvatar] = useState("")
-  // const [currentPage, setCurrentPage] = useState<"business" | "game" | "personal">("business")
-  const [showTour, setShowTour] = useState(false);
-  const [tourStep, setTourStep] = useState(0);
-  const [isLoadingTour, setIsLoadingTour] = useState(true);
+import { useState, useEffect } from "react";
+import Image from "next/image";
+import { useRouter, usePathname } from "next/navigation";
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
+import GoalDialog, { UserGoal } from "@/components/GoalDialog";
+import SettingsDialog from "@/components/SettingsDialog";
+// import QuestProgressBar if you prefer that component instead of the inline bar
+// import { QuestProgressBar } from "@/components/goalProgress";
 
+export default function DashboardPage() {
+  /* -----------------------------------------------------------------------
+     Local state – wire these to Supabase later.                           */
+  const [username, setUsername] = useState<string>("");
+  const [avatar, setAvatar]   = useState<string>("");
+  const [cash, setCash]       = useState<number>(0);
 
-  const [showSettingsDialog, setShowSettingsDialog] = useState(false)
+  const [focusedGoal, setFocusedGoal] = useState<UserGoal | null>(null);
+  const goalProgress = focusedGoal?.progress ?? 0; // 0‑100
 
-  // DB fields
-  const [cash, setCash] = useState<number>(0)
-  const [workforceManagement, setWorkforceManagement] = useState<number>(0)
-  const [customerSatisfaction, setCustomerSatisfaction] = useState<number>(0)
+  /* --- Dialog toggles --------------------------------------------------- */
+  const [showGoalDialog,     setShowGoalDialog]     = useState(false);
+  const [showSettingsDialog, setShowSettingsDialog] = useState(false);
 
-  const router = useRouter()
-  const pathname = usePathname();
+  /* --- Routing helpers -------------------------------------------------- */
+  const router    = useRouter();
+  const pathname  = usePathname();
 
+  /* -----------------------------------------------------------------------
+     TEMP: Pull basic user information from localStorage – replace with
+     Supabase queries or server components in the future.
+  ----------------------------------------------------------------------- */
   useEffect(() => {
-    const storedUsername = localStorage.getItem("username")
-    const storedUserId = localStorage.getItem("userId"); 
-    if (!storedUsername || !storedUserId) {
-      router.push("/")
-      return
-    }
-    setUsername(storedUsername)
-    setUserId(storedUserId);
-    fetchTourStatus(storedUsername)
-    const savedStep = localStorage.getItem('onboardingStep');
-    if (savedStep) {
-        setTourStep(parseInt(savedStep, 10));
-        localStorage.removeItem('onboardingStep'); // Clean up item
-    }
-    fetchUserData(storedUsername)
-  }, [router])
+    const name = localStorage.getItem("username") ?? "";
+    const cashStr = localStorage.getItem("cash") ?? "0";
+    const avatarPath = localStorage.getItem("avatar") ?? "";
 
-  async function fetchUserData(name: string) {
-    const { data, error } = await supabase
-      .from("users")
-      .select("cash, workforce_management_score, customer_satisfaction_score, avatar_path")
-      .eq("name", name)
-      .single()
+    setUsername(name);
+    setCash(parseInt(cashStr, 10));
+    setAvatar(avatarPath);
+  }, []);
 
-    if (error) {
-      console.error("Error fetching user data:", error.message)
-      return
-    }
-    if (!data) return
-
-    setCash(data.cash || 0)
-    setWorkforceManagement(data.workforce_management_score || 0)
-    setCustomerSatisfaction(data.customer_satisfaction_score || 0)
-    setAvatar(data.avatar_path || "")
+  /* --------------------------------------------------------------------- */
+  function handleGoalSelect(goal: UserGoal) {
+    setFocusedGoal(goal);
+    setShowGoalDialog(false);
+    /* TODO: Persist focused_goal_id -> Supabase */
   }
 
-  async function fetchTourStatus(name: string) {
-    setIsLoadingTour(true);
-    const { data, error } = await supabase
-      .from("users")
-      .select("dashboard_tour_done")
-      .eq("name", name)
-      .single()
-
-    if (error) {
-      console.error("Error fetching dashboard_tour_done:", error.message)
-      setShowTour(false);
-      return
-    } else if (data) {
-      console.log(`Tour status for ${name}: ${data.dashboard_tour_done}`);
-      setShowTour(!data.dashboard_tour_done); // Show tour if NOT done
-   } else {
-       // Handle case where user data might not be found?
-        setShowTour(false);
-   }
-   setIsLoadingTour(false); // Finish loading
- }
-
-  const handleFinishTourCallback = () => {
-    console.log("Tour finish callback triggered in parent page.");
-    setShowTour(false); // Hide the tour component
-    // No need to update DB here, the tour component does it now.
-  };
-
-  // Chart data: first week = user’s satisfaction, rest = 0
-  const chartData = Array.from({ length: 7 }, (_, i) => {
-    const val = i === 0 ? customerSatisfaction : 0
-    return {
-      week: i + 1,
-      score: val === 0 ? null : val,
-    }
-  })
-
-  // Callback from settings dialog to update state
-  const handleSettingsSave = (newAvatar: string, newLanguage: string, newSound: boolean) => {
-    setAvatar(newAvatar)
-    // (Optionally update other global settings as needed)
-    setShowSettingsDialog(false)
-  }
-
+  /* ===================================================================== */
   return (
     <main
-      className="min-h-screen w-full overflow-x-hidden overflow-y-auto relative flex flex-col"
+      className="min-h-screen w-full overflow-x-hidden overflow-y-auto relative flex flex-col pb-24"
       style={{
-        backgroundImage: "url('/dashboard/background_dashboard.png')",
+        backgroundImage: "url('/assets/Background/PNG/Fixed Background.png')", // replace if you moved the asset
         backgroundSize: "cover",
         backgroundPosition: "center",
       }}
     >
       {/* ================= HEADER ================= */}
-      <header className="p-4 relative" id="revenue">
-        {/* Clickable avatar in top right that opens the settings overlay */}
-        <div className="absolute top-4 right-4 cursor-pointer" onClick={() => setShowSettingsDialog(true)}>
-          <Avatar className="w-10 h-10">
+      <header className="p-4 relative">
+        {/* Avatar (opens Settings) */}
+        <button
+          onClick={() => setShowSettingsDialog(true)}
+          className="absolute top-4 right-4"
+        >
+          <Avatar className="w-10 h-10 border-2 border-white/60 shadow">
             {avatar ? (
               <AvatarImage src={avatar} alt={username} />
             ) : (
               <AvatarFallback>{username.charAt(0).toUpperCase()}</AvatarFallback>
             )}
           </Avatar>
-        </div>
+        </button>
 
-        <div className="mb-4">
+        {/* Cash counter */}
+        <div className="flex items-center justify-center gap-2">
+          <span className="text-3xl font-extrabold text-white drop-shadow-sm">
+            {cash}
+          </span>
           <Image
-            src="/dashboard/revenue_and_profit_tight.png"
-            alt="Revenue & Profit"
-            width={170}
-            height={40}
+            src="/assets/Revenue&Profits/Revenue&Profits_Coin/Revenue&Profits_Coin.svg" // ✅ update path if different
+            alt="Coin Icon"
+            width={28}
+            height={28}
+            priority
           />
         </div>
 
-        <div className="relative w-full max-w-[600px] bg-green-700 text-white px-4 py-3 rounded-3xl border-b-4 border-r-4 border-green-900 shadow-lg">
-          <p className="text-md mb-1 font-semibold">Total</p>
-          <p className="text-2xl font-bold">₹{cash}</p>
-          <div
-            className="absolute hover:scale-110 transition-transform"
-            style={{
-              top: "30%",
-              right: "10px",
-              transform: "translateY(-50%)",
-              width: "150px",
-              height: "550px",
-            }}
-          >
-            <Image
-              src="/dashboard/chest_icon.svg"
-              alt="Chest Icon"
-              fill
-              style={{ objectFit: "contain" }}
+        {/* Goal banner */}
+        <div className="mt-3 flex items-center gap-2 bg-[#F8D660] px-4 py-2 rounded-xl border-b-4 border-yellow-600 shadow-md">
+          <span className="text-sm font-semibold text-[#1f105c]">Goal</span>
+
+          {/* Simple progress bar – swap for <QuestProgressBar/> if desired */}
+          <div className="flex-1 h-3 mx-3 bg-white/40 rounded-full overflow-hidden">
+            <div
+              className="h-full bg-[#CF7F00]"
+              style={{ width: `${goalProgress}%` }}
             />
           </div>
+
+          {/* Edit / choose goal */}
+          <button onClick={() => setShowGoalDialog(true)} className="shrink-0">
+            <Image
+              src="/assets/Goals/Goals_Progress Bar/Editpen.svg" // ✅ update path
+              alt="Edit Goal"
+              width={20}
+              height={20}
+            />
+          </button>
         </div>
       </header>
 
-      {/* ================= MAIN CONTENT ================= */}
-      <div className="flex-1 px-4 pb-24">
-        <section className="mb-6" id="workforce">
-          <h2>
-            <div className="mb-4">
-              <Image
-                src="/dashboard/workforce_mgmt.png"
-                alt="Workforce Management"
-                width={220}
-                height={60}
-              />
-            </div>
-          </h2>
+      {/* ================= MAIN WIDGETS ================= */}
+      <div className="flex-1 px-4 space-y-8 mt-6">
+        {/* Monetary Growth ------------------------------------------------*/}
+        <section>
+          <Image
+            src="/assets/Business/Monetary Growth/Business_Monetary Growth_Title.svg" // ✅ update path
+            alt="Monetary Growth"
+            width={220}
+            height={40}
+            className="mb-2"
+          />
 
-          {workforceManagement <= 0 ? (
-            <div className="relative w-full max-w-[600px] bg-[rgba(255,255,224,0.7)] text-black px-4 py-3 rounded-xl border-b-4 border-r-4 border-yellow-300 shadow-lg">
-              <p className="text-sm font-semibold">
-                No Employees at the moment.
-                <br />
-                Hire employees to help you!
-              </p>
-            </div>
-          ) : (
-            <div className="flex gap-3 overflow-x-auto scrollbar-hide py-2">
-              {Array.from({ length: workforceManagement }, (_, i) => (
-                <div key={i} className="relative w-24 h-24 flex-shrink-0 hover:scale-105 transition-transform">
-                  <Image
-                    src="/dashboard/robot.png"
-                    alt="Robot Employee"
-                    fill
-                    style={{ objectFit: "contain" }}
-                  />
-                </div>
-              ))}
-            </div>
-          )}
+          <div className="relative w-full max-w-[600px] mx-auto bg-[rgba(255,255,255,0.1)] rounded-xl border-2 border-white/20 shadow-md">
+            {/* Replace static chart image with live component when ready */}
+            <Image
+              src="/assets/Business/Monetary Growth/Business_Monetary Growth_BarLineChart.svg" // ✅ update path
+              alt="Growth Chart"
+              width={600}
+              height={300}
+              className="object-contain w-full h-auto"
+            />
+          </div>
         </section>
 
-        <section id="satisfaction">
-          <h2>
-            <div className="mb-4">
-              <Image
-                src="/dashboard/customer_sats.png"
-                alt="Customer Satisfaction"
-                width={220}
-                height={60}
-              />
-            </div>
-          </h2>
+        {/* Customer Satisfaction -----------------------------------------*/}
+        <section>
+          <Image
+            src="/assets/Business/Customer Satisfaction/Business_CS_Title.svg" // ✅ update path
+            alt="Customer Satisfaction"
+            width={260}
+            height={40}
+            className="mb-2"
+          />
 
-          <div className="relative w-full max-w-[600px] bg-[rgba(255,255,224,0.7)] px-4 py-3 rounded-md border-b-4 border-r-4 border-yellow-300 shadow-lg">
-            <div className="overflow-x-auto scrollbar-hide">
-              <MyLineChart data={chartData} />
-            </div>
+          <div className="relative w-full max-w-[600px] mx-auto">
+            <Image
+              src="/assets/Business/Customer Satisfaction/Business_CS_Frame.svg" // ✅ update path
+              alt="Customer Satisfaction Bar"
+              width={600}
+              height={120}
+              className="object-contain w-full"
+            />
+            {/* Optionally overlay dynamic satisfaction marker here */}
+          </div>
+        </section>
+
+        {/* Quality & Reputation -------------------------------------------*/}
+        <section className="pb-4">
+          <Image
+            src="/assets/Business/Quality&Reputation/Business_Q&R_Title.svg" // ✅ update path
+            alt="Quality & Reputation"
+            width={260}
+            height={40}
+            className="mb-2"
+          />
+
+          <div className="relative w-full max-w-[600px] mx-auto flex justify-center">
+            <Image
+              src="/assets/Business/Quality&Reputation/Business_Q&R_Frame.svg" // ✅ update path
+              alt="Quality & Reputation Chart"
+              width={660}
+              height={260}
+              className="object-contain"
+            />
           </div>
         </section>
       </div>
 
-      {/* ======= BOTTOM NAVIGATION BAR ======== */}
-      <div className="fixed bottom-0 left-0 right-0 z-50">
-        <div className="relative h-[75px] bg-[#82b266] rounded-t-[32px] flex items-center justify-around px-6">
+      {/* ================= BOTTOM NAV ================= */}
+      <nav className="fixed bottom-0 left-0 right-0 z-50">
+        <div className="relative h-[75px] bg-[#FFFFFF] rounded-t-[32px] flex items-center justify-around px-6">
+          {/* Home / Goal */}
           <button
-            onClick={() => {
-              // setCurrentPage("business")
-              router.push("/dashboard/goal")
-            }}
-            className={`flex flex-col items-center gap-1 pt-2 hover:scale-110 transition-transform ${
-              pathname === "/dashboard/goal" ? "text-[#1f105c]" : "text-white"
+            onClick={() => router.push("/dashboard")}
+            className={`flex flex-col items-center hover:scale-110 transition-transform ${
+              pathname === "/dashboard" ? "text-[#1f105c]" : "text-white"
             }`}
           >
-            <div className="relative w-20 h-20">
+            <div className="relative w-12 h-12">
               <Image
-                src="/dashboard/home_icon.png"
+                src="/assets/Navbar/Navbar_Personal Icons/Navbar_Personal Icons_Clicked/Navbar_Personal Icons_Clicked.png" // ✅ update path
                 alt="Home"
                 fill
                 style={{ objectFit: "contain" }}
@@ -244,17 +216,15 @@ export default function Dashboard() {
             </div>
           </button>
 
-          <div className="relative -top-8">
+          {/* Game */}
+          <div className="relative -top-4">
             <button
-              onClick={() => {
-                // setCurrentPage("game")
-                router.push("/dashboard/game")
-              }}
-              className="relative w-24 h-24 bg-white rounded-full border-8 border-white flex items-center justify-center text-[#82b266] hover:scale-110 transition-transform"
+              onClick={() => router.push("/dashboard/game")}
+              className="relative w-32 h-32 bg-white rounded-full border-8 border-white flex items-center justify-center text-[#82b266] hover:scale-110 transition-transform"
             >
-              <div className="relative w-24 h-24">
+              <div className="relative w-48 h-48">
                 <Image
-                  src="/dashboard/game_icon.png"
+                  src="/assets/Navbar/Navbar_GameButton/Navbar_GameButton.png" // ✅ update path
                   alt="Game"
                   fill
                   style={{ objectFit: "contain" }}
@@ -263,46 +233,45 @@ export default function Dashboard() {
             </button>
           </div>
 
+          {/* Business (this page) */}
           <button
-            onClick={() => {
-              // setCurrentPage("personal")
-              router.push("/dashboard")
-            }}
-            className={`flex flex-col items-center gap-1 pt-2 hover:scale-110 transition-transform ${
-              pathname === "/dashboard" ? "text-[#1f105c]" : "text-white"
+            onClick={() => router.push("/dashboard/business")}
+            className={`flex flex-col items-center hover:scale-110 transition-transform ${
+              pathname === "/dashboard/business" ? "text-[#1f105c]" : "text-white"
             }`}
           >
-            <div className="relative w-20 h-20">
+            <div className="relative w-12 h-12">
               <Image
-                src="/dashboard/growth_icon.png"
-                alt="Dashboard"
+                src="/assets/Navbar/Navbar_Business Icons/Navbar_Business Icons_Clicked/Navbar_Business Icons_Clicked.png" // ✅ update path
+                alt="Business"
                 fill
                 style={{ objectFit: "contain" }}
               />
             </div>
           </button>
         </div>
-      </div>
+      </nav>
 
-      {!isLoadingTour && showTour && username && (
-        <OnboardingTour
-          key={pathname} // Add key based on pathname to help with state reset if needed
-          username={username}
-          onFinish={handleFinishTourCallback}
-          initialStep={tourStep} // Pass the potentially resumed step
+      {/* ============== DIALOGS ============== */}
+      {showGoalDialog && (
+        <GoalDialog
+          userId={"" /* supply real userId when hooked up */}
+          onClose={() => setShowGoalDialog(false)}
+          onGoalSelect={handleGoalSelect}
         />
       )}
+
       {showSettingsDialog && (
         <SettingsDialog
-          key={showSettingsDialog ? "open" : "closed"}  // Force remount on open
+          key="settings"
           username={username}
           initialAvatar={avatar}
-          initialLanguage="english" // Pass actual language if stored
-          initialSoundEnabled={true} // Pass actual sound setting if stored
+          initialLanguage="english"
+          initialSoundEnabled={true}
           onClose={() => setShowSettingsDialog(false)}
-          onSave={handleSettingsSave}
+          onSave={(newAvatar) => setAvatar(newAvatar)}
         />
       )}
     </main>
-  )
+  );
 }
