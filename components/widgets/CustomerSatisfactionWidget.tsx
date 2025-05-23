@@ -18,19 +18,18 @@ export default function CustomerSatisfactionWidget({ score }:Props) {
   ];
 
   return (
-    <section className="relative w-full max-w-[600px] mx-auto">
-      {/* frame */}
-      <Image src="/assets/Business/Customer Satisfaction/Business_CS_Frame.svg"
-             alt="frame" fill priority/>
-
+    // Replaced Image frame with custom div styling
+    // Added explicit height and flex for vertical centering of content
+    <section className="relative w-full bg-[#F9E0B7] border border-[#A03827] rounded-2xl mx-auto py-4 h-[120px] flex flex-col justify-center">
       {/* heading */}
       <div className="absolute -top-6 left-1/2 -translate-x-1/2 w-max">
         <Image src="/assets/Business/Customer Satisfaction/Business_CS_Title.svg"
                alt="title" width={300} height={32}/>
       </div>
 
-      {/* gradient rail */}
-      <div className="relative h-[72px] px-8 flex items-center">
+      {/* gradient rail container */}
+      {/* Adjusted padding for better fit inside new frame */}
+      <div className="relative h-[40px] px-6 flex items-center">
         <div className="relative w-full h-3 rounded-full overflow-hidden
                         ring-1 ring-black/10">
           <div className="absolute inset-0"
@@ -45,7 +44,8 @@ export default function CustomerSatisfactionWidget({ score }:Props) {
       </div>
 
       {/* emojis */}
-      <div className="absolute inset-0 px-8 flex items-center pointer-events-none">
+      {/* Adjusted padding to align with rail */}
+      <div className="absolute inset-0 px-6 flex items-center pointer-events-none">
         {faces.map(({pct:pos,icon},i)=>(
           <div key={i}
                className="absolute -translate-x-1/2"
@@ -57,7 +57,8 @@ export default function CustomerSatisfactionWidget({ score }:Props) {
       </div>
 
       {/* percentage label */}
-      <div className="absolute left-8 bottom-[6px] text-xs font-semibold
+      {/* Adjusted left position to align with rail */}
+      <div className="absolute left-6 bottom-[6px] text-xs font-semibold
                       text-[#B22335]">{pct}%</div>
     </section>
   );

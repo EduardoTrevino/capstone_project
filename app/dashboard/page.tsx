@@ -30,10 +30,10 @@ export default function DashboardPage() {
   const [showSettingsDialog, setShowSettingsDialog] = useState(false);
 
   /* ------------------------- derived styles --------------------------- */
+  // Adjusted cashFont for smaller container, matching reference closer (4654 should be text-3xl)
   const cashFont   = useMemo(() => {
-    if (cash < 1e6) return "text-4xl";
-    if (cash < 1e8) return "text-3xl";
-    if (cash < 1e10) return "text-2xl";
+    if (cash < 100000) return "text-3xl"; // For 4654, this will be text-3xl
+    if (cash < 1e6) return "text-2xl";
     return "text-xl";
   }, [cash]);
 
@@ -72,22 +72,23 @@ export default function DashboardPage() {
                  style={{ objectFit:"contain" }}/>
         </button>
 
-        {/* Revenue & Profit frame + value */}
-        <div className="relative mx-auto w-[280px] h-[120px] flex items-center justify-center">
-          <Image src="/assets/Revenue&Profits/Revenue&Profits.svg"
-                 alt="Revenue frame" fill priority />
-          <div className="relative z-10 flex items-center gap-1">
+        {/* Revenue & Profit frame + value - IMPROVED */}
+        {/* The frame is now a custom div with desired styling and size */}
+        <div className="relative mx-auto mt-2 w-fit h-fit px-6 py-2 bg-[#1D2557]
+                        rounded-xl border border-[#FFC709] shadow-lg flex items-center justify-center z-10">
+          <div className="flex items-center gap-1">
             <span className={`${cashFont} font-bold text-[#FFC709] tracking-tight`}>
               ₹{cash.toLocaleString()}
             </span>
             <Image src="/assets/Revenue&Profits/Revenue&Profits_Coin/Revenue&Profits_Coin.svg"
-                   alt="coin" width={28} height={28}/>
+                   alt="coin" width={24} height={24}/> {/* Adjusted coin size */}
           </div>
         </div>
 
         {/* GOAL banner – full-width (max 600px) */}
-        <div className="mx-auto mt-3 w-full max-w-[600px] px-4 py-2 bg-[#F8D660]
-                        rounded-xl border-b-4 border-[#CFBB3A] shadow flex items-center gap-3">
+        {/* Adjusted mt-3 to mt-[-10px] to create overlap with the cash frame */}
+        <div className="mx-auto mt-[-10px] w-full max-w-[600px] px-4 py-2 bg-[#F8D660]
+                        rounded-xl border-b-4 border-[#CFBB3A] shadow flex items-center gap-3 relative z-0">
           <span className="text-sm font-semibold text-[#1F105C]">Goal</span>
           <div className="flex-1 h-3 bg-white/40 rounded-full overflow-hidden">
             <div className="h-full bg-[#CF7F00] transition-all duration-500"
@@ -101,7 +102,8 @@ export default function DashboardPage() {
       </header>
 
       {/* ====================== KPI WIDGET BLOCKS ====================== */}
-      <div className="flex-1 px-4 space-y-10">
+      {/* Adjusted space-y for tighter spacing and added max-w for alignment */}
+      <div className="flex-1 px-4 space-y-6 mx-auto w-full max-w-[600px]">
         <MonetaryGrowthWidget
           data={[35,10,5,30,45,60]}          /* ← demo, wire later */
         />
