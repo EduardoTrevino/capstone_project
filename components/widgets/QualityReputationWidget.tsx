@@ -1,14 +1,13 @@
 "use client";
-
+// QualityReputationWidget – placeholder message inside decorative frame
 import Image from "next/image";
 
 export default function QualityReputationWidget() {
   return (
-    // Replaced Image frame with custom div styling
-    // Added explicit height and flex for vertical centering of content
-    <section className="relative w-full bg-[#F9E0B7] border border-[#A03827] rounded-2xl mx-auto py-4 h-[180px] flex flex-col items-center justify-center text-center">
+    // Adjusted padding and title position for more space
+    <section className="relative w-full bg-[#F9E0B7] border border-[#A03827] rounded-2xl mx-auto py-8 h-[180px] flex flex-col items-center justify-center text-center"> {/* Adjusted padding */}
       {/* heading */}
-      <div className="absolute -top-6 left-1/2 -translate-x-1/2 w-max">
+      <div className="absolute -top-10 left-1/2 -translate-x-1/2 w-max"> {/* Adjusted top */}
         <Image src="/assets/Business/Quality&Reputation/Business_Q&R_Title.svg"
                alt="title" width={300} height={32}/>
       </div>
