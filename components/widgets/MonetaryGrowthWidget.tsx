@@ -112,7 +112,7 @@ export default function MonetaryGrowthWidget({ data, latestCount = 6 }: Props) {
         className="absolute bottom-3 right-5 bg-[#F8D660] text-[#1F105C]
                    text-[11px] font-semibold px-4 py-1 rounded-lg shadow
                    hover:scale-105 transition">
-        {showAll ? "LATEST" : "ALL"}
+        {showAll ? "Lastest" : "All"}
       </button>
     </section>
   );
