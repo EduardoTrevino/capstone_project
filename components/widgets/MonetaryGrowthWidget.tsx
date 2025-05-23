@@ -65,20 +65,21 @@ export default function MonetaryGrowthWidget({ data, latestCount = 6 }: Props) {
 
   /* ===================================== */
   return (
-    // Adjusted padding and title position for more space
-    <section className="relative w-full bg-[#F9E0B7] border border-[#A03827] rounded-2xl mx-auto py-8"> {/* Adjusted padding */}
-      {/* heading asset */}
-      <div className="absolute -top-10 left-1/2 -translate-x-1/2 w-max"> {/* Adjusted top */}
+    <section className="relative w-full bg-[#F9E0B7] border border-[#A03827] rounded-2xl mx-auto py-8">
+      {/* heading asset - retaining -top-9 as per your visual reference */}
+      <div className="absolute -top-9 left-1/2 -translate-x-1/2 w-max">
         <Image src="/assets/Business/Monetary Growth/Business_Monetary Growth_Title.svg"
-               alt="title" width={240} height={32}/>
+               alt="title" width={320} height={48}/>
       </div>
 
-      {/* chart box */}
-      <div className="relative pt-8 pb-10 w-full h-[220px]">
+      {/* chart box - Adjusted padding for top and bottom space */}
+      {/* Reduced pt-8 pb-10 to pt-4 pb-4 to decrease overall vertical empty space */}
+      <div className="relative pt-4 pb-4 w-full h-[220px]"> {/* Changed pt/pb */}
         <ResponsiveContainer width="100%" height="100%">
           <LineChart data={chartData}
-                     // Adjusted margins to reduce internal indentation further
-                     margin={{ top:10, right:5, left:5, bottom:0 }}> {/* Reduced left/right margin */}
+                     // Adjusted margins for LineChart to optimize space within its container
+                     // Small top/bottom margin for data points/labels, zero left/right for full width
+                     margin={{ top:5, right:0, left:0, bottom:5 }}> {/* Adjusted margins */}
             <defs>
               <linearGradient id="growthFill" x1="0" y1="0" x2="0" y2="1">
                 <stop offset="0%"   stopColor="#FFC709" stopOpacity={0.9}/>
@@ -86,15 +87,15 @@ export default function MonetaryGrowthWidget({ data, latestCount = 6 }: Props) {
               </linearGradient>
             </defs>
             <CartesianGrid stroke="#9E826F" strokeDasharray="3 3" strokeOpacity={0.4}/>
-            {/* Changed dataKey to 'name' for just numbers on XAxis */}
-            <XAxis  dataKey="name" tick={{ fill:"#61412C", fontSize:10 }} tickLine={false} axisLine={false}/>
+            <XAxis  dataKey="name" tick={{ fill:"#61412C", fontSize:10 }} tickLine={false} axisLine={false}
+                    padding={{ left: 20, right: 20 }} />
             <YAxis  domain={[0, yMax]} interval="preserveStartEnd"
                     tick={{ fill:"#61412C", fontSize:10 }} tickLine={false} axisLine={false}
                     tickFormatter={(v)=>v===0?"":v}/>
             <Tooltip content={<CustomTip/>} cursor={{ stroke:"transparent" }}/>
             <Line type="monotone" dataKey="value"
                   stroke="#FF9A00" strokeWidth={2}
-                  dot={showAll ? false : CoinDot} // Conditionally hide dots
+                  dot={showAll ? false : CoinDot}
                   activeDot={{r:4}}
                   fill="url(#growthFill)" fillOpacity={1}/>
           </LineChart>

@@ -27,12 +27,11 @@ export default function CustomerSatisfactionWidget({ score }:Props) {
   }, [pct]);
 
   return (
-    // Adjusted padding and title position for more space
     <section className="relative w-full bg-[#F9E0B7] border border-[#A03827] rounded-2xl mx-auto py-8 h-[120px] flex flex-col justify-center">
-      {/* heading */}
-      <div className="absolute -top-10 left-1/2 -translate-x-1/2 w-max"> {/* Adjusted top */}
+      {/* heading - Adjusted top positioning */}
+      <div className="absolute -top-8 left-1/2 -translate-x-1/2 w-max"> {/* Changed -top-10 to -top-12 */}
         <Image src="/assets/Business/Customer Satisfaction/Business_CS_Title.svg"
-               alt="title" width={300} height={32}/>
+               alt="title" width={320} height={48}/>
       </div>
 
       {/* gradient rail container */}

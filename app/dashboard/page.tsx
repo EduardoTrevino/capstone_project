@@ -73,19 +73,19 @@ export default function DashboardPage() {
 
         {/* Revenue & Profit frame + value */}
         <div className="relative mx-auto mt-2 w-fit h-fit px-6 py-2 bg-[#1D2557]
-                        rounded-xl border border-[#FFC709] shadow-lg flex items-center justify-center z-10">
+                        rounded-xl border border-[#FFC709] shadow-lg flex items-center justify-center z-0">
           <div className="flex items-center gap-1">
             <span className={`${cashFont} font-bold text-[#FFC709] tracking-tight`}>
-              ₹{cash.toLocaleString()}
+              {cash.toLocaleString()}
             </span>
             <Image src="/assets/Revenue&Profits/Revenue&Profits_Coin/Revenue&Profits_Coin.svg"
-                   alt="coin" width={24} height={24}/>
+                   alt="coin" width={32} height={32}/>
           </div>
         </div>
 
         {/* GOAL banner */}
         <div className="mx-auto mt-[-10px] w-full max-w-[600px] px-4 py-2 bg-[#F8D660]
-                        rounded-xl border-b-4 border-[#CFBB3A] shadow flex items-center gap-3 relative z-0">
+                        rounded-xl border-b-4 border-[#CFBB3A] shadow flex items-center gap-3 relative z-10">
           <span className="text-sm font-semibold text-[#1F105C]">Goal</span>
           <div className="flex-1 h-3 bg-white/40 rounded-full overflow-hidden">
             <div className="h-full bg-[#CF7F00] transition-all duration-500"
@@ -102,9 +102,9 @@ export default function DashboardPage() {
       {/* Added mt-10 and increased space-y-10 to create space for the widget titles */}
       <div className="flex-1 px-4 mt-10 space-y-10 mx-auto w-full max-w-[600px]">
         <MonetaryGrowthWidget
-          data={[35,10,5,30,45,60]}
+          data={[35,10,5,30,45,60, 90, 100, 110, 120, 130, 140, 90, 64, 83, 95, 100, 98, 35,10,5,30,45,60]}
         />
-        <CustomerSatisfactionWidget score={37}/>
+        <CustomerSatisfactionWidget score={17}/>
         <QualityReputationWidget/>
       </div>
 
