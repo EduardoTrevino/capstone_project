@@ -1,145 +1,158 @@
 "use client";
 
-/* ============================================================================
-   Dashboard (v2) – unified business & goal view (mobile‑first)
-   ---------------------------------------------------------------------------
-   • Avatar → **top‑left** (opens settings)
-   • New **Log** button (top‑right) → /dashboard/log
-   • Cash counter now sits INSIDE the decorative Revenue&Profits frame and
-     auto‑shrinks font size as the number grows.
-   • Three KPI widgets have been factored out into separate, reusable
-     components:
-        ▸ MonetaryGrowthWidget
-        ▸ CustomerSatisfactionWidget
-        ▸ QualityReputationWidget
-   ============================================================================ */
+/*  DASHBOARD v2.1  – re-adds full-width goal banner, heading assets,
+    restores larger nav bar, etc.  */
 
 import { useState, useEffect, useMemo } from "react";
-import Image from "next/image";
+import Image                     from "next/image";
 import { useRouter, usePathname } from "next/navigation";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
-import GoalDialog, { UserGoal } from "@/components/GoalDialog";
-import SettingsDialog from "@/components/SettingsDialog";
+import GoalDialog,  { UserGoal }   from "@/components/GoalDialog";
+import SettingsDialog              from "@/components/SettingsDialog";
 
-// KPI widgets
-import MonetaryGrowthWidget from "@/components/widgets/MonetaryGrowthWidget";
-import CustomerSatisfactionWidget from "@/components/widgets/CustomerSatisfactionWidget";
-import QualityReputationWidget from "@/components/widgets/QualityReputationWidget";
+import MonetaryGrowthWidget        from "@/components/widgets/MonetaryGrowthWidget";
+import CustomerSatisfactionWidget  from "@/components/widgets/CustomerSatisfactionWidget";
+import QualityReputationWidget     from "@/components/widgets/QualityReputationWidget";
+
+/* ---------------------------------------------------------------------- */
 
 export default function DashboardPage() {
-  /* --------------------------------------------------------------------- */
   const router   = useRouter();
   const pathname = usePathname();
 
-  const [username, setUsername] = useState("");
+  /* ---------- demo state (swap for Supabase queries later) ------------ */
+  const [username, setUsername] = useState("E");
   const [avatar,   setAvatar]   = useState("");
-  const [cash,     setCash]     = useState(0);
+  const [cash,     setCash]     = useState(4654);        // ₹ demo
+  const [goal,     setGoal]     = useState<UserGoal | null>(null);
 
-  const [focusedGoal, setFocusedGoal] = useState<UserGoal | null>(null);
-  const [showGoalDialog, setShowGoalDialog]         = useState(false);
+  const [showGoalDialog,     setShowGoalDialog]     = useState(false);
   const [showSettingsDialog, setShowSettingsDialog] = useState(false);
 
-  /* ------------------------ bootstrap demo data ------------------------ */
-  const demoGrowth = [10, 20, 35, 5, 25, 45, 55, 60];
-  const demoSatisfaction = 37; // 0‑100
-
-  useEffect(() => {
-    // !! replace with Supabase
-    setUsername(localStorage.getItem("username") ?? "Eddie");
-    setAvatar(localStorage.getItem("avatar") ?? "");
-    setCash(Number(localStorage.getItem("cash") ?? 4568));
-  }, []);
-
-  /* ---------------------- derived / helper values ---------------------- */
-  const goalProgress = focusedGoal?.progress ?? 0;
-  const cashFontClass = useMemo(() => {
-    if (cash < 1e5)       return "text-4xl"; // < 100 000
-    if (cash < 1e7)       return "text-3xl"; // < 10 000 000
-    if (cash < 1e9)       return "text-2xl";
+  /* ------------------------- derived styles --------------------------- */
+  const cashFont   = useMemo(() => {
+    if (cash < 1e6) return "text-4xl";
+    if (cash < 1e8) return "text-3xl";
+    if (cash < 1e10) return "text-2xl";
     return "text-xl";
   }, [cash]);
 
-  /* --------------------------- callbacks -------------------------------- */
-  function handleGoalSelect(goal: UserGoal) {
-    setFocusedGoal(goal);
+  const goalPct = goal?.progress ?? 0;
+
+  /* ------------------------------------------------------------------- */
+  function handleGoalSelect(g: UserGoal) {
+    setGoal(g);
     setShowGoalDialog(false);
+    /* TODO - POST focused_goal_id to Supabase */
   }
 
-  /* ===================================================================== */
+  /* ------------------------------------------------------------------- */
   return (
     <main
-      className="min-h-screen w-full overflow-x-hidden overflow-y-auto relative flex flex-col pb-24"
+      className="min-h-screen w-full overflow-x-hidden overflow-y-auto pb-[120px] flex flex-col"
       style={{
-        backgroundImage: "url('/assets/Background/PNG/Fixed Background.png')",
-        backgroundSize: "cover",
-        backgroundPosition: "center",
+        background: "url('/assets/Background/PNG/Fixed Background.png') center / cover",
       }}
     >
-      {/* ============================ HEADER ============================ */}
-      <header className="relative py-4 px-4">
-        {/* Settings (avatar) – TOP‑LEFT */}
-        <button onClick={() => setShowSettingsDialog(true)} className="absolute top-4 left-4 z-20">
+      {/* =========================== HEADER ============================ */}
+      <header className="relative pt-4 pb-2 px-4">
+        {/* Avatar – top-left */}
+        <button onClick={() => setShowSettingsDialog(true)}
+                className="absolute top-4 left-4 z-20">
           <Avatar className="w-10 h-10 border-2 border-white/60 shadow">
-            {avatar ? <AvatarImage src={avatar} alt={username} /> : <AvatarFallback>{username.charAt(0).toUpperCase()}</AvatarFallback>}
+            {avatar ? <AvatarImage src={avatar} alt={username} />
+                    : <AvatarFallback>{username}</AvatarFallback>}
           </Avatar>
         </button>
 
-        {/* Log button – TOP‑RIGHT */}
-        <button onClick={() => router.push("/dashboard/log")} className="absolute top-4 right-4 z-20 w-10 h-10 hover:scale-110 transition-transform">
-          <Image src="/assets/Log/Log_Icon/Log_Icon.png" alt="Log" fill style={{ objectFit: "contain" }} />
+        {/* Log - top-right */}
+        <button onClick={() => router.push("/dashboard/log")}
+                className="absolute top-4 right-4 z-20 w-10 h-10 hover:scale-110 transition">
+          <Image src="/assets/Log/Log_Icon/Log_Icon.png" alt="Log" fill
+                 style={{ objectFit:"contain" }}/>
         </button>
 
-        {/* Revenue & Profit frame */}
-        <div className="relative mx-auto w-[260px] h-[110px] flex items-center justify-center">
-          <Image src="/assets/Revenue&Profits/Revenue&Profits.svg" alt="Revenue frame" fill priority />
-          <div className="relative z-10 flex items-center gap-2">
-            <span className={`${cashFontClass} font-extrabold text-[#1F105C] drop-shadow-sm`}>₹{cash.toLocaleString()}</span>
-            <Image src="/assets/Revenue&Profits/Revenue&Profits_Coin/Revenue&Profits_Coin.svg" alt="Coin" width={32} height={32} />
+        {/* Revenue & Profit frame + value */}
+        <div className="relative mx-auto w-[280px] h-[120px] flex items-center justify-center">
+          <Image src="/assets/Revenue&Profits/Revenue&Profits.svg"
+                 alt="Revenue frame" fill priority />
+          <div className="relative z-10 flex items-center gap-1">
+            <span className={`${cashFont} font-bold text-[#FFC709] tracking-tight`}>
+              ₹{cash.toLocaleString()}
+            </span>
+            <Image src="/assets/Revenue&Profits/Revenue&Profits_Coin/Revenue&Profits_Coin.svg"
+                   alt="coin" width={28} height={28}/>
           </div>
         </div>
 
-        {/* Goal banner */}
-        <div className="mt-3 mx-auto flex items-center gap-2 bg-[#F8D660] px-4 py-2 rounded-xl border-b-4 border-yellow-600 shadow-md w-fit">
-          <span className="text-sm font-semibold text-[#1f105c]">Goal</span>
-          <div className="flex-1 h-3 w-40 bg-white/40 rounded-full overflow-hidden">
-            <div className="h-full bg-[#CF7F00]" style={{ width: `${goalProgress}%` }} />
+        {/* GOAL banner – full-width (max 600px) */}
+        <div className="mx-auto mt-3 w-full max-w-[600px] px-4 py-2 bg-[#F8D660]
+                        rounded-xl border-b-4 border-[#CFBB3A] shadow flex items-center gap-3">
+          <span className="text-sm font-semibold text-[#1F105C]">Goal</span>
+          <div className="flex-1 h-3 bg-white/40 rounded-full overflow-hidden">
+            <div className="h-full bg-[#CF7F00] transition-all duration-500"
+                 style={{ width:`${goalPct}%` }}/>
           </div>
-          <button onClick={() => setShowGoalDialog(true)} className="shrink-0">
-            <Image src="/assets/Goals/Goals_Progress Bar/Editpen.svg" alt="Edit Goal" width={20} height={20} />
+          <button onClick={() => setShowGoalDialog(true)}>
+            <Image src="/assets/Goals/Goals_Progress Bar/Editpen.svg"
+                   alt="edit" width={20} height={20}/>
           </button>
         </div>
       </header>
 
-      {/* ========================= KPI WIDGETS ========================= */}
-      <div className="flex-1 px-4 space-y-8 mt-4">
-        <MonetaryGrowthWidget data={demoGrowth} />
-        <CustomerSatisfactionWidget score={demoSatisfaction} />
-        <QualityReputationWidget />
+      {/* ====================== KPI WIDGET BLOCKS ====================== */}
+      <div className="flex-1 px-4 space-y-10">
+        <MonetaryGrowthWidget
+          data={[35,10,5,30,45,60]}          /* ← demo, wire later */
+        />
+        <CustomerSatisfactionWidget score={37}/>
+        <QualityReputationWidget/>
       </div>
 
-      {/* ========================= NAV BAR ============================ */}
-      <nav className="fixed bottom-0 left-0 right-0 z-50">
-        <div className="relative h-[75px] bg-[#FFFFFF] rounded-t-[32px] flex items-center justify-around px-6">
-          <button onClick={() => router.push("/dashboard")} className="hover:scale-110 transition-transform">
-            <Image src="/assets/Navbar/Navbar_Personal Icons/Navbar_Personal Icons_Clicked/Navbar_Personal Icons_Clicked.png" alt="Home" width={48} height={48} />
+      {/* ======================= NAVIGATION BAR ======================== */}
+      <nav className="fixed bottom-0 inset-x-0 z-50">
+        <div className="relative h-[95px] bg-white rounded-t-[32px]
+                        flex items-center justify-around px-6">
+          {/* Home / Personal */}
+          <button onClick={() => router.push("/dashboard")}
+                  className="hover:scale-110 transition">
+            <Image src="/assets/Navbar/Navbar_Personal Icons/Navbar_Personal Icons_Clicked/Navbar_Personal Icons_Clicked.png"
+                   alt="home" width={48} height={48}/>
           </button>
-          <div className="relative -top-4">
-            <button onClick={() => router.push("/dashboard/game")} className="relative w-24 h-24 bg-white rounded-full border-8 border-white flex items-center justify-center hover:scale-110 transition-transform">
-              <Image src="/assets/Navbar/Navbar_GameButton/Navbar_GameButton.png" alt="Game" fill style={{ objectFit: "contain" }} />
+
+          {/* Game (big middle button) */}
+          <div className="relative -top-5">
+            <button onClick={() => router.push("/dashboard/game")}
+                    className="w-[100px] h-[100px] bg-white rounded-full border-8 border-white
+                               flex items-center justify-center hover:scale-110 transition">
+              <Image src="/assets/Navbar/Navbar_GameButton/Navbar_GameButton.png"
+                     alt="game" fill style={{ objectFit:"contain" }}/>
             </button>
           </div>
-          <button onClick={() => router.push("/dashboard/business")} className="hover:scale-110 transition-transform">
-            <Image src="/assets/Navbar/Navbar_Business Icons/Navbar_Business Icons_Clicked/Navbar_Business Icons_Clicked.png" alt="Business" width={48} height={48} />
+
+          {/* Business */}
+          <button onClick={() => router.push("/dashboard/business")}
+                  className="hover:scale-110 transition">
+            <Image src="/assets/Navbar/Navbar_Business Icons/Navbar_Business Icons_Clicked/Navbar_Business Icons_Clicked.png"
+                   alt="biz" width={48} height={48}/>
           </button>
         </div>
       </nav>
 
-      {/* ======================== DIALOGS ============================= */}
+      {/* ========================= DIALOGS ============================ */}
       {showGoalDialog && (
-        <GoalDialog userId="" onClose={() => setShowGoalDialog(false)} onGoalSelect={handleGoalSelect} />
+        <GoalDialog userId=""
+                    onClose={() => setShowGoalDialog(false)}
+                    onGoalSelect={handleGoalSelect}/>
       )}
       {showSettingsDialog && (
-        <SettingsDialog key="settings" username={username} initialAvatar={avatar} initialLanguage="english" initialSoundEnabled={true} onClose={() => setShowSettingsDialog(false)} onSave={setAvatar} />
+        <SettingsDialog key="settings"
+                        username={username}
+                        initialAvatar={avatar}
+                        initialLanguage="english"
+                        initialSoundEnabled
+                        onClose={() => setShowSettingsDialog(false)}
+                        onSave={setAvatar}/>
       )}
     </main>
   );
