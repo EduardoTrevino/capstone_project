@@ -106,12 +106,12 @@ export default function DashboardPage() {
       </header>
 
       {/* ===================== KPI widgets ===================== */}
-      <div className="flex-1 px-4 mt-10 space-y-10 mx-auto w-full max-w-[600px]">
+      <div className="flex-1 px-3 mt-10 space-y-10 mx-auto w-full max-w-[600px]">
         <MonetaryGrowthWidget
           data={[35, 10, 5, 30, 45, 60, 90, 100, 110, 120, 130, 140]}
           total={cash}
         />
-        <CustomerSatisfactionWidget score={24} />
+        <CustomerSatisfactionWidget score={50} />
         <QualityReputationWidget />
       </div>
 
