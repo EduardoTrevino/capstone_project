@@ -118,7 +118,7 @@ export default function Home() {
 
     if (existingUser.intro_done) {
       // Redirect existing users who finished intro to the NEW home page (goals)
-      router.push("/dashboard/goal")
+      router.push("/dashboard/")
     } else {
       router.push("/intro/1")
     }
