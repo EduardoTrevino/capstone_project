@@ -114,13 +114,13 @@ export function Header({ username, avatar, goalPct, onAvatarClick, onLogClick, o
 }
 
 // ---------------------------- bottom nav ----------------------------
-function BottomNav({ router }: { router: any }) {
+export function BottomNav({ router }: { router: any }) {
   return (
     <nav className="fixed bottom-0 inset-x-0 z-50">
       <div className="relative h-[95px] bg-white rounded-t-[32px] flex items-center justify-around px-6">
         <button onClick={() => router.push("/dashboard")} className="hover:scale-110 transition"><Image src="/assets/Navbar/Navbar_Personal Icons/Navbar_Personal Icons_Clicked/Navbar_Personal Icons_Clicked.png" alt="home" width={48} height={48} /></button>
         <div className="relative -top-5"><button onClick={() => router.push("/dashboard/game")} className="w-[100px] h-[100px] bg-white rounded-full border-8 border-white flex items-center justify-center hover:scale-110 transition"><Image src="/assets/Navbar/Navbar_GameButton/Navbar_GameButton.png" alt="game" fill style={{ objectFit: "contain" }} /></button></div>
-        <button onClick={() => router.push("/dashboard/business")} className="hover:scale-110 transition"><Image src="/assets/Navbar/Navbar_Business Icons/Navbar_Business Icons_Clicked/Navbar_Business Icons_Clicked.png" alt="biz" width={48} height={48} /></button>
+        <button onClick={() => router.push("/dashboard/growth")} className="hover:scale-110 transition"><Image src="/assets/Navbar/Navbar_Business Icons/Navbar_Business Icons_Clicked/Navbar_Business Icons_Clicked.png" alt="biz" width={48} height={48} /></button>
       </div>
     </nav>
   );

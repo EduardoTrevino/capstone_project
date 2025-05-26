@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import Image from "next/image";
-import { Header, BottomNav } from "@/app/dashboard/page"; // re‑use header/nav
+import { Header, BottomNav } from "@/app/dashboard/page";
 import EthicalDecisionMakingWidget from "@/components/widgets/EthicalDecisionMakingWidget";
 import RiskTakingAbilityWidget from "@/components/widgets/RiskTakingAbilityWidget";
 import LockedWidget from "@/components/widgets/LockedWidget";
@@ -13,7 +13,7 @@ export default function GrowthPage() {
 
   const [username] = useState("E");
   const [avatar, setAvatar] = useState("");
-  const [goalPct] = useState(60);
+  const [goalPct] = useState(0);
 
   return (
     <main
@@ -30,8 +30,8 @@ export default function GrowthPage() {
       />
 
       <div className="flex-1 px-4 mt-10 space-y-10 mx-auto w-full max-w-[600px]">
-        <EthicalDecisionMakingWidget positivePct={30} />
-        <RiskTakingAbilityWidget level="calculative" />
+        <EthicalDecisionMakingWidget positivePct={50} />
+        <RiskTakingAbilityWidget score={50} />
         <LockedWidget titleSrc="/assets/Growth/ct_title.svg" />
         <LockedWidget titleSrc="/assets/Growth/aspi_title.svg" />
       </div>
