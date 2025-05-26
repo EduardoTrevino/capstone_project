@@ -104,7 +104,7 @@ export default function DashboardPage() {
         <MonetaryGrowthWidget
           data={[35,10,5,30,45,60, 90, 100, 110, 120, 130, 140, 90, 64, 83, 95, 100, 98, 35,10,5,30,45,60]}
         />
-        <CustomerSatisfactionWidget score={17}/>
+        <CustomerSatisfactionWidget score={74}/>
         <QualityReputationWidget/>
       </div>
 
