@@ -30,8 +30,8 @@ export default function GrowthPage() {
       />
 
       <div className="flex-1 px-4 mt-10 space-y-10 mx-auto w-full max-w-[600px]">
-        <EthicalDecisionMakingWidget positivePct={50} />
-        <RiskTakingAbilityWidget score={50} />
+        <EthicalDecisionMakingWidget positivePct={25} />
+        <RiskTakingAbilityWidget score={100} />
         <LockedWidget titleSrc="/assets/Growth/ct_title.svg" />
         <LockedWidget titleSrc="/assets/Growth/aspi_title.svg" />
       </div>
