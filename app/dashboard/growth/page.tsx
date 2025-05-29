@@ -11,7 +11,7 @@ import LockedWidget from "@/components/widgets/LockedWidget";
 export default function GrowthPage() {
   const router = useRouter();
 
-  const [username] = useState("E");
+  const [username] = useState("Eduardo_Test");
   const [avatar, setAvatar] = useState("");
   const [goalPct] = useState(0);
 
