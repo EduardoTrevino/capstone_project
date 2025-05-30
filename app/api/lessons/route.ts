@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabase } from "@/lib/supabase"; // Ensure this is your admin client for writes
 
+
 // Define the NEW structure for the JSON response we expect from OpenAI
 const gameStepSchemaForAI = {
   type: "object",
@@ -109,6 +110,24 @@ interface DefinitionsBundle {
     kcs: KCDefinition[];
     kcIdentifierToIdMap: Map<string, number>;
 }
+interface DialogueEntry {
+    role: 'user' | 'assistant' | 'system';
+    content: string;
+  }
+  interface WinConditionItem {
+    metric_name: string;
+    operator: ">=" | "<=" | ">" | "<" | "==" | "=";
+    value: number;
+    type?: "increase" | "increase_from_new_bundle"; // For special handling
+    is_profit_proxy?: boolean; // If this revenue condition actually represents profit
+}
+
+interface MetricScore {
+    metrics: {
+        name: string;
+    };
+    current_value: string | number;
+}
 
 // Helper to get current game state from dialogue history
 function getCurrentGameState(history: any[]) {
@@ -125,27 +144,29 @@ function getCurrentGameState(history: any[]) {
 }
 
 async function getDefinitionsBundle(): Promise<DefinitionsBundle> {
-    const { data: metrics, error: metricsError } = await supabase
+    const { data: metricsData, error: metricsError } = await supabase
         .from('metrics')
         .select('id, name, data_type, min_value, max_value, initial_value');
     if (metricsError) throw new Error(`Failed to fetch metrics: ${metricsError.message}`);
 
-    const { data: kcEffects, error: kcEffectsError } = await supabase
+    const { data: kcEffectsData, error: kcEffectsError } = await supabase
         .from('kc_metric_effects')
         .select('kc_id, metric_id');
     if (kcEffectsError) throw new Error(`Failed to fetch kc_metric_effects: ${kcEffectsError.message}`);
 
-    const { data: kcs, error: kcsError } = await supabase
+    const { data: kcsData, error: kcsError } = await supabase
         .from('kcs')
         .select('id, kc_identifier, name, description');
     if (kcsError) throw new Error(`Failed to fetch KCs: ${kcsError.message}`);
     
-    const kcIdentifierToIdMap = new Map((kcs || []).map(kc => [kc.kc_identifier, kc.id]));
+    const metrics = (metricsData || []).map(m => ({ ...m, initial_value: Number(m.initial_value) })) as MetricDefinition[];
+    const kcs = (kcsData || []) as KCDefinition[];
+    const kcIdentifierToIdMap = new Map(kcs.map(kc => [kc.kc_identifier, kc.id]));
 
     return {
-        metrics: metrics || [],
-        kcEffects: kcEffects || [],
-        kcs: kcs || [],
+        metrics,
+        kcEffects: kcEffectsData || [],
+        kcs,
         kcIdentifierToIdMap,
     };
 }
@@ -170,36 +191,44 @@ export async function POST(req: NextRequest) {
 
     const { data: goalRow, error: goalError } = await supabase
         .from("goals")
-        .select("name, description, win_conditions_description")
+        .select("name, description, win_conditions_description, win_conditions_structured")
         .eq("id", focusedGoalId)
         .single();
     if (goalError || !goalRow) {
         console.error("Goal not found:", goalError);
         return NextResponse.json({ error: "Goal not found" }, { status: 404 });
     }
-    const { name: goalName, description: goalDescription, win_conditions_description: goalWinConditions } = goalRow;
-
-    const { data: userGoalData, error: userGoalError } = await supabase
+    const { name: goalName, description: goalDescription, win_conditions_structured: goalWinConditionsStructured } = goalRow;
+    const textualWinConditions = goalRow.win_conditions_description || "Achieve positive outcomes in key metrics."; // For prompt
+    
+    let { data: userGoalData, error: userGoalDbError } = await supabase // Changed name to avoid conflict
         .from("user_goals")
-        .select("dialogue_history, attempts_for_current_goal_cycle, status")
+        .select("dialogue_history, attempts_for_current_goal_cycle, status, initial_metric_baselines") // Added initial_metric_baselines
         .eq("user_id", userId)
         .eq("goal_id", focusedGoalId)
         .single();
 
-    // If no user_goals row, create one. This should ideally happen when user selects a goal.
-    if (userGoalError && userGoalError.code === 'PGRST116') {
+    if (userGoalDbError && userGoalDbError.code === 'PGRST116') {
         console.warn(`No user_goals entry for user ${userId}, goal ${focusedGoalId}. Creating one.`);
-        const { data: newUserGoal, error: insertError } = await supabase
+        // Fetch current metrics to store as baseline IF this is the very start of this goal for the user
+        const { data: currentMetricsForBaseline } = await supabase
+            .from('user_metric_scores')
+            .select('metric_id, current_value')
+            .eq('user_id', userId);
+        
+        const initialBaselines: {[key: string]: number} = {};
+        await Promise.all((currentMetricsForBaseline || []).map(async m => {
+            const metricDef = (await getDefinitionsBundle()).metrics.find(md => md.id === m.metric_id);
+            if(metricDef) initialBaselines[metricDef.name] = Number(m.current_value);
+        }));
+
+        const { data: newUserGoalData, error: insertError } = await supabase
             .from('user_goals')
             .insert({
-                user_id: userId,
-                goal_id: focusedGoalId,
-                dialogue_history: [],
-                attempts_for_current_goal_cycle: 0,
-                status: 'active', // or 'pending_initial_scenario'
-                progress: 0
+                user_id: userId, goal_id: focusedGoalId, dialogue_history: [], attempts_for_current_goal_cycle: 0,
+                status: 'active', progress: 0, initial_metric_baselines: initialBaselines
             })
-            .select()
+            .select("dialogue_history, attempts_for_current_goal_cycle, status, initial_metric_baselines")
             .single();
         if (insertError) {
             console.error("Failed to create user_goals entry:", insertError);
@@ -207,16 +236,17 @@ export async function POST(req: NextRequest) {
         }
         // @ts-ignore // Supabase types might not reflect the select immediately
         userGoalData = newUserGoal;
-    } else if (userGoalError) {
-        console.error("Error fetching user_goals data:", userGoalError);
+    } else if (userGoalDbError) {
+        console.error("Error fetching user_goals data:", userGoalDbError);
         return NextResponse.json({ error: "Failed to fetch user goal data." }, { status: 500 });
     }
 
-    const dialogueHistory = userGoalData?.dialogue_history ?? [];
+    const dialogueHistory: DialogueEntry[] = userGoalData?.dialogue_history ?? [];
     // attempts_for_current_goal_cycle from DB is count of *completed* attempts for this goal cycle.
     // scenarioAttemptNumber is the current one being played (1-indexed).
     const completedAttemptsForCycle = userGoalData?.attempts_for_current_goal_cycle ?? 0;
     const scenarioAttemptNumber = completedAttemptsForCycle + 1;
+    const initialMetricBaselines = userGoalData?.initial_metric_baselines || {};
 
 
     const previousGameState = getCurrentGameState(dialogueHistory);
@@ -255,11 +285,15 @@ export async function POST(req: NextRequest) {
 
     let totalKcChangesForThisTurn: Array<{ kc_id: number, kc_identifier: string, change: number }> = [];
     if (decisionIndex !== null && dialogueHistory.length > 0) {
-        const lastAssistantResponseEntry = dialogueHistory.findLast((entry: { role: string; content: string }) => entry.role === 'assistant');
+        const lastAssistantResponseEntry = dialogueHistory.findLast((entry) => entry.role === 'assistant');
         if (lastAssistantResponseEntry) {
             try {
                 const previousStepData = JSON.parse(lastAssistantResponseEntry.content);
-                const chosenOption = previousStepData.decisionPoint?.options?.[decisionIndex?? 0];
+                // Ensure decisionIndex is valid for the options array
+                const chosenOption = (typeof decisionIndex === 'number' && decisionIndex >= 0 && decisionIndex < (previousStepData.decisionPoint?.options?.length || 0))
+                    ? previousStepData.decisionPoint.options[decisionIndex]
+                    : null;
+
                 if (chosenOption?.kc_impacts?.length > 0) {
                     for (const impact of chosenOption.kc_impacts) {
                         const kc_id = definitions.kcIdentifierToIdMap.get(impact.kc_identifier);
@@ -269,9 +303,13 @@ export async function POST(req: NextRequest) {
                                 p_user_id: userId, p_kc_id: kc_id, p_increment_value: impact.score
                             });
                             if (kcScoreError) console.error(`Error RPC increment_user_kc_score for ${impact.kc_identifier}:`, kcScoreError);
-                        } else console.warn(`KC ID for ${impact.kc_identifier} not found in map.`);
+                        } else console.warn(`KC ID for ${impact.kc_identifier} not found in map during KC impact processing.`);
                     }
                     console.log(`[/api/lessons] Processed KC impacts for decision ${decisionIndex}:`, totalKcChangesForThisTurn);
+                } else if (chosenOption) {
+                    console.warn(`Chosen option ${decisionIndex} had no kc_impacts or kc_impacts array was empty.`);
+                } else {
+                    console.warn(`Could not find chosen option for decisionIndex ${decisionIndex} in previous step data or previous step had no decision point/options.`);
                 }
             } catch (e) { console.error("Error parsing previous AI response for KC impacts:", e); }
         }
@@ -327,7 +365,7 @@ export async function POST(req: NextRequest) {
     // The system prompt needs to adapt based on whether it's a new scenario or continuation
     let systemPrompt = `You are an expert scenario generator for an educational business simulation game.
 Player: "${userName}".
-Current Learning Goal: "${goalName}". Goal Description: "${goalDescription}". Win Conditions: "${goalWinConditions}".
+Current Learning Goal: "${goalName}". Goal Description: "${goalDescription}". Win Conditions: "${textualWinConditions}".
 This is Scenario Attempt number ${scenarioAttemptNumber} for this goal (out of 3 attempts, each with a unique narrative).
 
 Available Knowledge Components (KCs) for you to reference and assign scores to:
@@ -352,7 +390,7 @@ Detailed Instructions:
     *   \`narrativeSteps\`: Provide engaging dialogue. Characters should react realistically to prior choices if applicable. Use the provided character list (Rani, Ali, Santosh, Manju, Rajesh, Narrator). Ensure pfp paths are correct (e.g., /game/character_pfp/rani.png).
     *   \`mainCharacterImage\`: Use full paths (e.g., /game/characters/ali.png) or null.
 2.  KCs:
-    *   \`scenarioKCsOverall\`: IF \`currentDecisionCount\` is 0, select 1-3 KC identifiers from the list that this entire scenario attempt will focus on. Otherwise, this should be an empty array or omitted if schema allows (for now, schema requires it, so provide an empty array if not first step or make schema allow null).
+    *   \`scenarioKCsOverall\`: IF \`currentDecisionCount\` is 0, select 1-3 KC identifiers from the list that this entire scenario attempt will focus on. Otherwise,  MUST be an empty array \`[]\`.
     *   \`decisionPointKCsFocused\`: For each \`decisionPoint\`, select 1-3 relevant KC identifiers.
     *   \`kc_impacts\` (within each option): Assign 1-3 KCs. Scores should be small integers (e.g., -2, -1, 0, 1, 2, max -3 to +3). Positive scores are good for the KC, negative are detrimental.
 3.  Decision Points & Options:
@@ -378,7 +416,7 @@ Character PFP and Image Paths:
 Scenario Characters:
 - Rani: She is a successful Entrepreneur who is always willing to provide help and guidance. Her persona is exuberant, encouraging, and quick to offer both positive affirmation and constructive feedback.
 - Ali: He is a partner to the player. He is the entrepreneurial vendor who introduces advanced drone technology and leasing models. He also provides the hardware for missions, tasks, and challenges in the game.
-- Santosh: He is a customer and farmer by profession. He also voices the other customers’ feedback and needs on their behalf. His persona is that of a wise elder and community figure with a strong sense of ethics and social responsibility. 
+- Santosh: He is a customer and farmer by profession. He also voices the other customers' feedback and needs on their behalf. His persona is that of a wise elder and community figure with a strong sense of ethics and social responsibility. 
 - Manju: She is an official from a government-backed program or a funding agency that incentivizes agritech innovations—particularly drone leasing. Her role is to acts as a resource for subsidies, grants, or low-interest loans to support entrepreneurs who meet certain criteria (e.g., community impact, sustainable practices).
 - Rajesh: He is a friendly rival and occasional co-learner, representing the typical rural youth eager to learn new tech skills. His role is to encourage healthy competition, which can drive engagement.
 
@@ -409,8 +447,8 @@ Scenario Characters:
         messagesForOpenAI.push({ role: "user", content: `I chose decision option index: ${decisionIndex}. Based on the Current State (${currentDecisionCount} decisions made before this choice), what happens next?` });
     } else if (currentDecisionCount === 0) {
         messagesForOpenAI.push({ role: "user", content: "Start this new scenario attempt." });
-    } else if (currentDecisionCount === 3) {
-        messagesForOpenAI.push({ role: "user", content: "Provide the conclusion for this scenario." });
+    } else if (currentDecisionCount >= 3) { // Should generate conclusion
+        messagesForOpenAI.push({ role: "user", content: "Provide the conclusion for this scenario as I've made 3 decisions." });
     }
     
     console.log("[/api/lessons] Messages for OpenAI =>", JSON.stringify(messagesForOpenAI, null, 2));
@@ -462,9 +500,9 @@ Scenario Characters:
     // Decision points and options are saved as they are generated.
 
     // For now, just update dialogue_history and progress. Granular saving is a larger task.
-    const newDialogueHistoryEntry = { role: "assistant", content }; // The raw JSON from AI
+    const newDialogueHistoryEntry: DialogueEntry = { role: "assistant", content };
     const updatedDialogueHistory = [...dialogueHistory];
-    if (decisionIndex !== null) { // Add user's explicit choice if one was made
+    if (decisionIndex !== null) {
         updatedDialogueHistory.push({ role: "user", content: `User chose decision index: ${decisionIndex}` });
     }
     updatedDialogueHistory.push(newDialogueHistoryEntry);
@@ -477,99 +515,129 @@ Scenario Characters:
 
     if (scenarioJustCompleted) {
         updatedCompletedAttemptsForCycle++;
+        // If a scenario completes, and it's the start of a new attempt cycle for this goal,
+        // we might need to reset/snapshot initial_metric_baselines for "increase" type goals.
+        // This logic is deferred for now.
     }
 
-    const { data: allCurrentUserMetricScoresData } = await supabase.from('user_metric_scores').select('metrics(name), current_value').eq('user_id', userId);
+    const { data: allCurrentUserMetricScoresData } = await supabase
+        .from('user_metric_scores')
+        .select('metrics(name), current_value')
+        .eq('user_id', userId) as { data: MetricScore[] | null };
     const currentUserMetrics = new Map(allCurrentUserMetricScoresData?.map(m => [m.metrics.name, parseFloat(m.current_value as any)]));
     console.log("[/api/lessons] Current User Metrics for Win Condition Check:", Object.fromEntries(currentUserMetrics));
 
     let goalAchieved = false;
-    // TODO: Implement structured win condition parsing or hardcode per goalName
-    if (goalWinConditions) {
-        try {
-            // Example: "Profit >= 2000 AND Customer Satisfaction >= 50 AND Reputation >= 3.0"
-            const conditions = goalWinConditions.split("AND").map(c => c.trim());
-            let allConditionsMet = true;
-            let conditionsProgress = conditions.map(() => 0); // Progress for each condition
+    if (goalWinConditionsStructured && Array.isArray(goalWinConditionsStructured)) {
+        const conditions = goalWinConditionsStructured as WinConditionItem[];
+        let allConditionsMet = true;
+        let conditionsProgressParts = conditions.map(() => 0);
 
-            for (let i = 0; i < conditions.length; i++) {
-                const condition = conditions[i];
-                const match = condition.match(/(.+?)\s*([><=!]+)\s*([\d.]+)/);
-                if (match) {
-                    const metricName = match[1].trim();
-                    const operator = match[2];
-                    const targetValue = parseFloat(match[3]);
-                    const currentValue = currentUserMetrics.get(metricName) ?? 0;
-                    let conditionMet = false;
-                    if (operator === ">=") conditionMet = currentValue >= targetValue;
-                    else if (operator === "<=") conditionMet = currentValue <= targetValue;
-                    else if (operator === ">") conditionMet = currentValue > targetValue;
-                    else if (operator === "<") conditionMet = currentValue < targetValue;
-                    else if (operator === "==" || operator === "=") conditionMet = currentValue === targetValue;
-                    
-                    if (!conditionMet) allConditionsMet = false;
+        for (let i = 0; i < conditions.length; i++) {
+            const condition = conditions[i];
+            let currentValue = currentUserMetrics.get(condition.metric_name) ?? 0;
+            const targetValue = condition.value;
+            let conditionMet = false;
 
-                    // Partial progress for this condition
-                    if (targetValue > 0) { // Avoid division by zero for non-positive targets
-                        let progressForCondition = (currentValue / targetValue) * (100 / conditions.length);
-                        if (operator.includes("=")) { // For >= or <=, cap at 100% for this part
-                            progressForCondition = Math.min(100 / conditions.length, progressForCondition);
-                        }
-                        conditionsProgress[i] = Math.max(0, progressForCondition); // Ensure no negative progress
-                    } else if (currentValue === targetValue && (operator === "==" || operator === "=")) {
-                        conditionsProgress[i] = 100 / conditions.length;
-                    }
-
-                    console.log(`[WinCheck] Metric: ${metricName}, Current: ${currentValue}, Operator: ${operator}, Target: ${targetValue}, Met: ${conditionMet}, ProgressPart: ${conditionsProgress[i]}`);
-                } else {
-                    allConditionsMet = false; // Invalid condition format
-                    console.warn(`Invalid win condition format: ${condition}`);
-                }
+            if (condition.type === "increase" || condition.type === "increase_from_new_bundle") {
+                const baseline = Number(initialMetricBaselines[condition.metric_name] || 0);
+                currentValue = currentValue - baseline; // Check the increase from baseline
+                console.log(`[WinCheck-Increase] Metric: ${condition.metric_name}, Current Increase: ${currentValue}, Baseline: ${baseline}, Target Increase: ${targetValue}`);
             }
-            goalAchieved = allConditionsMet;
-            goalProgressValue = Math.round(conditionsProgress.reduce((sum, p) => sum + p, 0));
 
-        } catch (e) {
-            console.error("Error parsing win_conditions_description:", e);
-            // Fallback progress calculation if parsing fails
-            goalProgressValue = Math.min(95, Math.round(((currentDecisionCount + (decisionIndex !== null ? 1 : 0)) / 3) * 90) + 5);
+            if (condition.operator === ">=") conditionMet = currentValue >= targetValue;
+            else if (condition.operator === "<=") conditionMet = currentValue <= targetValue;
+            else if (condition.operator === ">") conditionMet = currentValue > targetValue;
+            else if (condition.operator === "<") conditionMet = currentValue < targetValue;
+            else if (condition.operator === "==" || condition.operator === "=") conditionMet = currentValue === targetValue;
+            
+            if (!conditionMet) allConditionsMet = false;
+
+            if (targetValue > 0 || (targetValue === 0 && condition.operator.includes("="))) { // Handle non-zero targets and zero targets with equality
+                let progressForCondition = (targetValue !== 0 ? (currentValue / targetValue) : (currentValue === 0 ? 1 : 0)) * (100 / conditions.length);
+                if (condition.operator.includes("=")) {
+                     progressForCondition = Math.min(100 / conditions.length, progressForCondition);
+                }
+                 conditionsProgressParts[i] = Math.max(0, progressForCondition);
+            } else if (targetValue < 0) { // Handle negative targets (e.g. reduce loss to < -1000)
+                 // Progress for negative targets can be tricky, e.g. how far are you from *not* exceeding a negative limit
+                 // For simplicity, if met, full part, else 0 for this complex case.
+                 conditionsProgressParts[i] = conditionMet ? (100 / conditions.length) : 0;
+            }
+
+
+            console.log(`[WinCheck] Metric: ${condition.metric_name}, Current: ${currentValue}, Operator: ${condition.operator}, Target: ${targetValue}, Met: ${conditionMet}, ProgressPart: ${conditionsProgressParts[i]}`);
         }
-    } else { // Fallback if no win_conditions_description
-        goalProgressValue = Math.min(95, Math.round(((currentDecisionCount + (decisionIndex !== null ? 1 : 0)) / 3) * 90) + 5);
+        goalAchieved = allConditionsMet;
+        goalProgressValue = Math.round(conditionsProgressParts.reduce((sum, p) => sum + p, 0));
+    } else {
+        console.warn("No structured win conditions found for this goal. Using fallback progress.");
+        const decisionsMadeThisScenario = currentDecisionCount + (decisionIndex !== null ? 1:0);
+        goalProgressValue = Math.min(95, Math.round((decisionsMadeThisScenario / 3) * 90) + 5);
     }
-
 
     if (goalAchieved) {
         goalStatus = 'completed';
-        goalProgressValue = 100; // Ensure 100% on achievement
+        goalProgressValue = 100;
         console.log(`[/api/lessons] Goal "${goalName}" ACHIEVED by user ${userId}!`);
     } else if (scenarioJustCompleted && updatedCompletedAttemptsForCycle >= 3) {
         goalStatus = 'failed_needs_retry';
-        console.log(`[/api/lessons] Goal "${goalName}" NOT achieved after 3 attempts. Status: ${goalStatus}`);
+        console.log(`[/api/lessons] Goal "${goalName}" NOT achieved after ${updatedCompletedAttemptsForCycle} attempts. Status: ${goalStatus}`);
     } else if (scenarioJustCompleted) {
         console.log(`[/api/lessons] Scenario attempt ${updatedCompletedAttemptsForCycle} for goal "${goalName}" completed. Goal not yet achieved.`);
-        // goalProgressValue is already calculated based on metrics
     }
-    // If not scenarioJustCompleted, goalProgressValue is also based on metrics or decision count as fallback.
     goalProgressValue = Math.min(100, Math.max(0, goalProgressValue));
+
+    // When a new scenario starts (decisionIndex is null AND it's not the very first decision ever for this goal-user combo)
+    // AND it's a new attempt number, we should reset the dialogue history for THIS goal attempt in user_goals.
+    // This prevents the AI from getting confused by a very long history spanning multiple full scenarios.
+    let finalDialogueHistoryForDB = updatedDialogueHistory;
+    if (decisionIndex === null && scenarioAttemptNumber > completedAttemptsForCycle && completedAttemptsForCycle > 0) { // Starting a genuinely new attempt after a previous one
+      console.log(`[/api/lessons] Starting new scenario attempt ${scenarioAttemptNumber}. Clearing dialogue history for this attempt.`);
+      finalDialogueHistoryForDB = [newDialogueHistoryEntry]; // Start fresh with only the AI's first message of new scenario
+      
+      // Also, re-snapshot baselines if there are "increase" type goals.
+      const { data: currentMetricsForNewBaseline } = await supabase
+            .from('user_metric_scores')
+            .select('metric_id, current_value')
+            .eq('user_id', userId);
+        
+      const newInitialBaselines: {[key: string]: number} = {};
+      (currentMetricsForNewBaseline || []).forEach(m => {
+          const metricDef = definitions.metrics.find(md => md.id === m.metric_id);
+          if(metricDef) newInitialBaselines[metricDef.name] = Number(m.current_value);
+      });
+      // Update userGoalData with new baselines
+      if (userGoalData) {
+          userGoalData.initial_metric_baselines = newInitialBaselines;
+          console.log(`[/api/lessons] Updated initial_metric_baselines for new attempt:`, newInitialBaselines);
+      }
+    }
 
 
     const { error: upsertError } = await supabase.from("user_goals").upsert({
-        user_id: userId, goal_id: focusedGoalId, dialogue_history: updatedDialogueHistory,
+        user_id: userId, goal_id: focusedGoalId, dialogue_history: finalDialogueHistoryForDB,
         progress: goalProgressValue, status: goalStatus,
         attempts_for_current_goal_cycle: updatedCompletedAttemptsForCycle,
+        initial_metric_baselines: userGoalData?.initial_metric_baselines || {}, // Persist potentially updated baselines
         updated_at: new Date().toISOString(),
     }, { onConflict: "user_id,goal_id" });
 
     if (upsertError) console.error("Error upserting user_goals:", upsertError);
 
+    // The number of decisions effectively made in the scenario that just got a response
+    const decisionsEffectivelyMadeThisScenario = currentDecisionCount + (parsedScenarioStep.decisionPoint && decisionIndex !== null ? 1 : (decisionIndex === null && parsedScenarioStep.decisionPoint ? 0 : (decisionIndex !== null && !parsedScenarioStep.decisionPoint ? 1 : 0) ) );
+
+
     return NextResponse.json({
         scenarioStep: parsedScenarioStep,
-        scenarioAttemptNumber: scenarioAttemptNumber,
+        scenarioAttemptNumber: scenarioAttemptNumber, // The attempt number that was just played/started
         metricChangesSummary: metricChangesSummary,
         goalStatusAfterStep: goalStatus,
         currentGoalProgress: goalProgressValue,
-        currentDecisionCountAfterStep: currentDecisionCount + (decisionIndex !== null ? 1 : 0) // For frontend to update its own decision counter
+        // This should reflect the number of decisions made IN THE SCENARIO that the AI just responded FOR.
+        // If AI returned DP2, it means 1 decision was made. If AI returned conclusion, 3 decisions were made.
+        currentDecisionCountInScenario: parsedScenarioStep.scenarioComplete ? 3 : decisionsEffectivelyMadeThisScenario
     });
 
   } catch (err: any) {
@@ -594,4 +662,14 @@ Scenario Characters:
     // This requires careful management of scenario IDs and potentially passing the current `scenario.id` if continuing.
     // For now, the response is sent back, and the game page consumes it. The `dialogue_history` holds the full AI output.
 
-
+    // Saving Granular Scenario Data (The BIG TODO):
+    // When currentDecisionCount === 0 (new scenario starts):
+    // Take parsedScenarioStep.scenarioContextNarrative and insert a new row into your scenarios table, linking it to goal_id and the current scenarioAttemptNumber. Get the new scenario.id.
+    // For each KC in parsedScenarioStep.scenarioKCsOverall, insert into scenario_targeted_kcs using the new scenario.id.
+    // Whenever a decisionPoint is generated:
+    // Insert into decision_points table, linking to the current scenario.id and decision_order. Get the new decision_point.id.
+    // For KCs in decisionPointKCsFocused, insert into decision_point_focused_kcs.
+    // For each option in options:
+    // Insert into options table, linking to decision_point.id. Get option.id.
+    // For each kc_impact, insert into option_kc_effects linking to option.id.
+    // This requires passing the current active_scenario_id (from your scenarios table) back and forth or fetching it based on user_id, goal_id, and scenarioAttemptNumber. This is a significant piece of backend logic.
