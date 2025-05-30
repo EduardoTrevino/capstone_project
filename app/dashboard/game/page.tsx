@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation";
 import React from 'react';
 import DecisionProgressBar from "@/components/DecisionProgressBar";
 import { ChatMessage } from "@/components/ChatMessage";
+import { supabase } from "@/lib/supabase"; // Import Supabase clien
 
 interface NarrativeDialogue {
   character: "Rani" | "Ali" | "Santosh" | "Manju" | "Rajesh" | "Narrator";
@@ -54,6 +55,8 @@ export default function NarrativeGamePage() {
   const [staggeredMessages, setStaggeredMessages] = useState<DisplayMessage[]>([]);
   const [messageQueue, setMessageQueue] = useState<NarrativeDialogue[]>([]);
   const [showInteractionArea, setShowInteractionArea] = useState(false);
+  const [goalDescriptionForLoading, setGoalDescriptionForLoading] = useState<string | null>(null);
+  const [gameBackground] = useState<string>("/game/bgs/bg_1.png");
   const [isInitialLoading, setIsInitialLoading] = useState(true);
   const [mainCharacterImage, setMainCharacterImage] = useState<string | null>(null);
   const [isLoadingApi, setIsLoadingApi] = useState(false);
@@ -79,14 +82,59 @@ export default function NarrativeGamePage() {
     }
     setUserId(storedUserId);
     setStaggeredMessages([]);
-    setIsInitialLoading(true);
     setDecisionCount(0);
-    loadScenarioStep(null, storedUserId);
+    setIsInitialLoading(true); // Explicitly set to true
+
+    async function fetchGoalDescriptionAndLoadScenario() {
+        try {
+            const { data: userData, error: userErr } = await supabase
+                .from('users')
+                .select('focused_goal_id')
+                .eq('id', storedUserId)
+                .single();
+
+            if (userErr || !userData || !userData.focused_goal_id) {
+                console.error("Could not fetch user's focused goal", userErr);
+                setError("Could not load goal information. Please try again.");
+                setIsInitialLoading(false); // Stop loading if goal info fails
+                return;
+            }
+
+            const { data: goalData, error: goalErr } = await supabase
+                .from('goals')
+                .select('description')
+                .eq('id', userData.focused_goal_id)
+                .single();
+
+            if (goalErr || !goalData) {
+                console.error("Could not fetch goal description", goalErr);
+                setGoalDescriptionForLoading("Goal details could not be loaded.");
+            } else {
+                setGoalDescriptionForLoading(goalData.description || "No goal description available.");
+            }
+        } catch (e: any) {
+            console.error("Error fetching initial goal data:", e);
+            setGoalDescriptionForLoading("Error loading goal details.");
+        } finally {
+            // Now load the scenario itself, isInitialLoading will be set to false
+            // by loadScenarioStep or its error handling.
+            if (storedUserId) {
+                loadScenarioStep(null, storedUserId);
+            }
+        }
+    }
+
+    fetchGoalDescriptionAndLoadScenario();
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [router]);
+  }, [router]); // Removed loadScenarioStep from here, it's called internally now
 
   // Handle new scenario step data
   useEffect(() => {
+    if (!isLoadingApi && (currentStepData || error)) { // If API is not loading AND we have data OR an error
+      if (isInitialLoading) {
+          setIsInitialLoading(false);
+      }
+  }
     if (!currentStepData || isLoadingApi) return;
 
     setShowInteractionArea(false);
@@ -123,7 +171,7 @@ export default function NarrativeGamePage() {
     }
 
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [currentStepData, isLoadingApi]);
+  }, [currentStepData, error, isLoadingApi]);
 
   // Auto-scroll chat
   useEffect(() => {
@@ -168,9 +216,10 @@ export default function NarrativeGamePage() {
       setCurrentStepData(null);
     } finally {
       setIsLoadingApi(false);
+      if (isInitialLoading) setIsInitialLoading(false); 
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []); // Removed userId dependency as it's passed in
+  }, [isInitialLoading]); // Removed userId dependency as it's passed in
 
   const handleNextStep = useCallback(() => {
     if (isLoadingApi || messageQueue.length === 0) return;
@@ -267,7 +316,7 @@ export default function NarrativeGamePage() {
 
   // --- Render ---
 
-  if (error) { /* Error rendering unchanged */
+  if (error && !isInitialLoading) { /* Error rendering unchanged */
     return (
       <div className="flex items-center justify-center min-h-screen bg-red-100 text-gray-800">
         <div className="bg-white p-6 rounded-lg shadow-xl text-center max-w-md border border-red-300">
@@ -282,8 +331,34 @@ export default function NarrativeGamePage() {
   }
 
    if (isInitialLoading) { /* Initial loading unchanged */
-     return ( <div className="flex items-center justify-center min-h-screen bg-gray-900 text-white text-xl font-semibold"> Loading Scenario... </div> );
-   }
+    return (
+      <div
+        className="flex items-center justify-center min-h-screen w-full p-4"
+        style={{
+          background: `url('${gameBackground}') center/cover no-repeat`,
+        }}
+      >
+        {goalDescriptionForLoading ? (
+          <div
+            className="bg-[#FEECCF] text-black p-6 md:p-8 rounded-xl shadow-2xl max-w-lg text-center animate-fade-in"
+          >
+            <h2 className="text-2xl font-bold mb-4">Your Current Goal:</h2>
+            <p className="text-md leading-relaxed">{goalDescriptionForLoading}</p>
+            <div className="mt-6 flex items-center justify-center">
+              <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-t-2 border-gray-700"></div>
+              <p className="ml-3 text-gray-700 font-semibold">Loading scenario...</p>
+            </div>
+          </div>
+        ) : (
+          // Fallback if goal description is still loading or failed before scenario load starts
+          <div className="flex flex-col items-center justify-center text-white">
+            <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-white mb-4"></div>
+            <p className="text-xl font-semibold">Loading Game...</p>
+          </div>
+        )}
+      </div>
+    );
+  }
 
    // ========================================================================
    // LAYOUT STRUCTURE CHANGE:

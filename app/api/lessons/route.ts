@@ -1,19 +1,19 @@
 import { NextRequest, NextResponse } from "next/server";
-import { supabase } from "@/lib/supabase"; // client with insert/update perms
+import { supabase } from "@/lib/supabase"; // Ensure this is your admin client for writes
 
-// Define the structure for the JSON response we expect from OpenAI
-const scenarioStepSchema = {
+// Define the NEW structure for the JSON response we expect from OpenAI
+const gameStepSchemaForAI = {
   type: "object",
   properties: {
     narrativeSteps: {
       type: "array",
-      description: "Dialogue exchanges for this step. Should contain at least one step unless it's only feedback/completion.",
+      description: "Dialogue exchanges for this step. The first dialogue object can serve as the initial scene-setting for this part of the scenario. Subsequent dialogues react to choices or advance the narrative.",
       items: {
         type: "object",
         properties: {
-          character: { type: "string", description: "Name of the character speaking (e.g., Rani, Ali, Yash, Nisha, Narrator).", enum: ["Rani", "Ali", "Yash", "Nisha", "Narrator"] },
-          pfp: { type: "string", description: "Full path to the character's profile picture (e.g., /game/character_pfp/rani.png)." },
-          text: { type: "string", description: "The dialogue text." },
+          character: { type: "string", enum: ["Rani", "Ali", "Santosh", "Manju", "Rajesh", "Narrator"], description: "Character speaking." },
+          pfp: { type: "string", description: "Full path to character pfp (e.g., /game/character_pfp/rani.png)." },
+          text: { type: "string", description: "Dialogue text for this character." },
         },
         required: ["character", "pfp", "text"],
         additionalProperties: false,
@@ -21,27 +21,64 @@ const scenarioStepSchema = {
     },
     mainCharacterImage: {
       type: ["string", "null"],
-      description: "Full path to the main character image (e.g., /game/characters/ali.png) or null.",
+      description: "Full path to main character image (e.g., /game/characters/ali.png) or null if no specific character is focused or image remains unchanged.",
+    },
+    scenarioContextNarrative: {
+        type: "string",
+        description: "A brief overarching narrative context for THE ENTIRE SCENARIO (max 3-4 sentences). This is generated ONCE at the start of a new scenario (when decision count is 0). For subsequent steps within the same scenario, this can be a very short reminder or omitted if narrativeSteps cover it."
+    },
+    scenarioKCsOverall: {
+        type: "array",
+        description: "List of 1 to 3 KC identifiers (e.g., 'KC6') that this ENTIRE SCENARIO primarily focuses on. Generated ONCE at the start of a new scenario. Pick from the provided KC list. These are the main learning objectives for the whole scenario.",
+        items: { type: "string", description: "A KC identifier from the provided list." },
+        minItems: 1,
+        maxItems: 3,
     },
     decisionPoint: {
       type: ["object", "null"],
-      description: "Present if the user needs to make a choice (max 3 per scenario).",
+      description: "Present if the user needs to make a choice (max 3 per scenario). Null if scenarioComplete=true or if this step is purely narrative continuation without a new decision.",
       properties: {
-        question: { type: "string", description: "The question prompting the decision." },
+        question: { type: "string", description: "The question or dilemma presented to the player for this decision point." },
+        decisionPointKCsFocused: {
+            type: "array",
+            description: "List of 1 to 3 KC identifiers that this specific decision point primarily focuses on. Pick from the provided KC list.",
+            items: { type: "string", description: "A KC identifier from the provided list." },
+            minItems: 1,
+            maxItems: 3
+        },
         options: {
           type: "array",
           description: "Exactly 4 distinct options for the user to choose from.",
           items: {
             type: "object",
             properties: {
-              text: { type: "string", description: "The text content of the option." }
+              text: { type: "string", description: "The text content of the option." },
+              kc_impacts: {
+                type: "array",
+                description: "List of 1 to 3 KCs impacted by choosing this option, along with their scores. Pick KC identifiers from the provided list.",
+                items: {
+                  type: "object",
+                  properties: {
+                    kc_identifier: { type: "string", description: "The KC identifier (e.g., 'KC6', 'KC5') affected. MUST be one of the provided KCs." },
+                    score: { type: "integer", description: "A small positive or negative integer score (e.g., between -3 and +3) representing the impact on this KC." }
+                  },
+                  required: ["kc_identifier", "score"],
+                  additionalProperties: false
+                },
+                minItems: 1,
+                maxItems: 3 // As per "1 < x < 4", allowing 1-3 for flexibility
+              }
             },
-            required: ["text"],
+            required: ["text", "kc_impacts"],
             additionalProperties: false
           },
+          minItems: 4,
+          maxItems: 4
         },
       },
-      required: ["question", "options"],
+      // If decisionPoint is an object, these fields are expected.
+      // The 'null' type for decisionPoint handles its absence.
+      required: ["question", "decisionPointKCsFocused", "options"],
       additionalProperties: false,
     },
     scenarioComplete: {
@@ -52,178 +89,284 @@ const scenarioStepSchema = {
   required: [
     "narrativeSteps",
     "mainCharacterImage",
-    "decisionPoint",
+    // scenarioContextNarrative & scenarioKCsOverall are crucial for the first step of a new scenario
+    // For subsequent steps, they might not be regenerated by AI if prompt guides it.
+    // Let's make them required in schema, but prompt should guide when to fill them.
+    "scenarioContextNarrative",
+    "scenarioKCsOverall",
+    "decisionPoint", // Key must be present, value can be null
     "scenarioComplete",
   ],
   additionalProperties: false,
 };
 
-// Helper to get current game state from dialogue history
+// Helper to get current game state from dialogue history (remains similar)
 function getCurrentGameState(history: any[]) {
-    let decisionCount = 0;
+    let decisionPointPresentations = 0; // Counts how many times AI presented a decision point
+    let userDecisionsMade = 0; // Counts how many times user made a choice
     let lastDecisionIndex: number | null = null;
-    let correctedDecisionCount = 0;
 
-    // First pass: Count decisions presented by assistant
     history.forEach(entry => {
         if (entry.role === 'assistant') {
             try {
                 const stepData = JSON.parse(entry.content);
-                if (stepData.decisionPoint) correctedDecisionCount++;
-            } catch (e) { /* ignore parse errors */ }
-        }
-    });
-
-    // Second pass: Correlate user actions for last decision index and count user decisions made
-    history.forEach(entry => {
-        if (entry.role === 'user') {
-            if (entry.content?.includes("chose decision index")) {
+                if (stepData.decisionPoint && stepData.decisionPoint.question) { // Check if it's a valid decision point
+                    decisionPointPresentations++;
+                }
+            } catch (e) { /* ignore parse errors in history */ }
+        } else if (entry.role === 'user') {
+            if (entry.content?.includes("User chose decision index:")) {
+                 userDecisionsMade++;
                  const match = entry.content.match(/index: (\d+)/);
                  if (match) lastDecisionIndex = parseInt(match[1], 10);
-                 decisionCount++; // Count user *actions*
             }
         }
     });
-
-    // Return the count based on *user actions* as it's more reliable for progression
-    // Keep correctedDecisionCount potentially for debugging/validation if needed
-    console.log(`State Check: User Decisions Made = ${decisionCount}, Assistant Decisions Presented = ${correctedDecisionCount}, Last User Choice = ${lastDecisionIndex}`);
-    return { decisionCount, lastDecisionIndex };
+    // The number of decisions made by the user is the most reliable counter for progression.
+    return { decisionCount: userDecisionsMade, lastDecisionIndex, decisionPointPresentations };
+}
+async function getKCDefinitions() {
+    const { data, error } = await supabase.from('kcs').select('kc_identifier, name, description');
+    if (error) {
+        console.error("Error fetching KC definitions:", error);
+        return [];
+    }
+    return data || [];
 }
 
 export async function POST(req: NextRequest) {
   try {
-    // --- Steps 1-5 (Setup, Parse Request, Get User/Goal, Get History, Calc State) ---
     const apiKey = process.env.OPENAI_API_KEY;
     if (!apiKey) return NextResponse.json({ error: "Missing OPENAI_API_KEY" }, { status: 500 });
+
     const { userId, decisionIndex } = (await req.json()) as { userId?: string; decisionIndex?: number | null; };
     if (!userId) return NextResponse.json({ error: "Missing userId" }, { status: 400 });
-    console.log(`[/api/lesson] Request for user ${userId}, decisionIndex: ${decisionIndex}`);
+
+    console.log(`[/api/lessons] Request for user ${userId}, decisionIndex: ${decisionIndex}`);
+
     const { data: userRow, error: userError } = await supabase.from("users").select("name, focused_goal_id").eq("id", userId).single();
-    if (userError || !userRow || !userRow.focused_goal_id) return NextResponse.json({ error: "User or goal setup invalid" }, { status: 404 });
+    if (userError || !userRow || !userRow.focused_goal_id) return NextResponse.json({ error: "User or focused_goal_id setup invalid" }, { status: 404 });
     const userName = userRow.name; const focusedGoalId = userRow.focused_goal_id;
-    const { data: goalRow, error: goalError } = await supabase.from("goals").select("name, description").eq("id", focusedGoalId).single();
+
+    const { data: goalRow, error: goalError } = await supabase.from("goals").select("name, description, win_conditions_description").eq("id", focusedGoalId).single();
     if (goalError || !goalRow) return NextResponse.json({ error: "Goal not found" }, { status: 404 });
-    const goalName = goalRow.name; const goalDescription = goalRow.description || "No description provided.";
-    const { data: userGoalsRow } = await supabase.from("user_goals").select("dialogue_history").eq("user_id", userId).eq("goal_id", focusedGoalId).single();
-    const dialogueHistory = userGoalsRow?.dialogue_history ?? [];
+    const goalName = goalRow.name;
+    const goalDescription = goalRow.description || "No description provided.";
+    const goalWinConditions = goalRow.win_conditions_description || "Achieve positive outcomes in key metrics."
+
+    // Fetch dialogue history AND current scenario attempt number
+    const { data: userGoalData, error: userGoalError } = await supabase
+        .from("user_goals")
+        .select("dialogue_history, attempts_for_current_goal_cycle")
+        .eq("user_id", userId)
+        .eq("goal_id", focusedGoalId)
+        .single();
+
+    if (userGoalError) {
+        console.error("Error fetching user_goals data:", userGoalError);
+        // If no row, means it's the first time. Initialize dialogue_history.
+        if (userGoalError.code === 'PGRST116') { // " réfrigéré row not found"
+             // This case should ideally be handled by creating user_goal entry when goal is set.
+        } else {
+            return NextResponse.json({ error: "Failed to fetch user goal data." }, { status: 500 });
+        }
+    }
+    
+    const dialogueHistory = userGoalData?.dialogue_history ?? [];
+    const scenarioAttemptNumber = (userGoalData?.attempts_for_current_goal_cycle ?? 0) % 3 + 1; // 1, 2, or 3
+
     const previousGameState = getCurrentGameState(dialogueHistory);
-    console.log("[/api/lesson] Previous Game State:", previousGameState);
-    const currentDecisionCount = previousGameState.decisionCount + (decisionIndex !== null ? 1 : 0);
-    console.log(`[/api/lesson] Calculated current state for prompt: Decisions=${currentDecisionCount}`)
+    // currentDecisionCount refers to decisions *already made* in this scenario attempt
+    const currentDecisionCount = previousGameState.decisionCount; 
+    
+    console.log(`[/api/lessons] Goal: ${goalName}. Scenario Attempt: ${scenarioAttemptNumber}. Decisions Made in current attempt: ${currentDecisionCount}`);
 
-    // --- Step 6: Build the dynamic system prompt ---
-    const systemPrompt = `
-You are a scenario generator for an educational game. The player is "${userName}".
-The current learning goal is "${goalName}". Goal Description: "${goalDescription}".
-Note: The player already knows who the characters are so they do not need to introduce themselves. 
+    const kcDefinitions = await getKCDefinitions();
+    const kcListForPrompt = kcDefinitions.map(kc => `- ${kc.kc_identifier}: ${kc.name} (${kc.description || 'General business skill'})`).join("\n");
 
-Scenario Characters & Assets:
+    // --- Build the dynamic system prompt ---
+    // The system prompt needs to adapt based on whether it's a new scenario or continuation
+    let systemPrompt = `You are an expert scenario generator for an educational business simulation game.
+Player: "${userName}".
+Current Learning Goal: "${goalName}". Goal Description: "${goalDescription}". Win Conditions: "${goalWinConditions}".
+This is Scenario Attempt number ${scenarioAttemptNumber} for this goal (out of 3 attempts, each with a unique narrative).
+
+Available Knowledge Components (KCs) for you to reference and assign scores to:
+${kcListForPrompt}
+
+Scenario Structure:
+A full scenario consists of an initial narrative, followed by 3 decision points, and a concluding narrative.
+- Start of Scenario (0 decisions made): Generate \`scenarioContextNarrative\`, \`scenarioKCsOverall\`, initial \`narrativeSteps\`, and the FIRST \`decisionPoint\`. \`scenarioComplete\` is false.
+- Mid-Scenario (1 or 2 decisions made): Generate follow-up \`narrativeSteps\` based on the last choice, and the NEXT \`decisionPoint\`. \`scenarioContextNarrative\` & \`scenarioKCsOverall\` should be omitted or very brief reminders, as they were set at the start. \`scenarioComplete\` is false.
+- End of Scenario (3 decisions made): Generate FINAL \`narrativeSteps\` concluding the story. \`decisionPoint\` MUST be null. \`scenarioComplete\` is true. \`scenarioContextNarrative\` & \`scenarioKCsOverall\` are omitted.
+
+Current State for this Scenario Attempt:
+- Decisions successfully made by user so far in THIS scenario: ${currentDecisionCount}
+${previousGameState.lastDecisionIndex !== null ? `- User's previous decision index choice: ${previousGameState.lastDecisionIndex}` : ''}
+${decisionIndex !== null ? `- User has JUST chosen decision option index: ${decisionIndex} for the decision point that was presented.` : (currentDecisionCount === 0 ? '- User is starting this new scenario attempt.' : '- User is continuing the scenario.')}
+
+Your Task: Generate the JSON for the *next* step of the scenario. Adhere STRICTLY to the provided JSON schema.
+
+Detailed Instructions:
+1.  Narrative & Dialogue:
+    *   \`scenarioContextNarrative\`: Generate a compelling, unique overarching story for this scenario attempt number ${scenarioAttemptNumber} ONLY IF \`currentDecisionCount\` is 0. Keep it to 2-4 sentences. For subsequent steps, make it very brief (e.g., "Continuing from your choice...") or an empty string if covered by \`narrativeSteps\`.
+    *   \`narrativeSteps\`: Provide engaging dialogue. Characters should react realistically to prior choices if applicable. Use the provided character list (Rani, Ali, Santosh, Manju, Rajesh, Narrator). Ensure pfp paths are correct (e.g., /game/character_pfp/rani.png).
+    *   \`mainCharacterImage\`: Use full paths (e.g., /game/characters/ali.png) or null.
+2.  KCs:
+    *   \`scenarioKCsOverall\`: IF \`currentDecisionCount\` is 0, select 1-3 KC identifiers from the list that this entire scenario attempt will focus on. Otherwise, this should be an empty array or omitted if schema allows (for now, schema requires it, so provide an empty array if not first step or make schema allow null).
+    *   \`decisionPointKCsFocused\`: For each \`decisionPoint\`, select 1-3 relevant KC identifiers.
+    *   \`kc_impacts\` (within each option): Assign 1-3 KCs. Scores should be small integers (e.g., -2, -1, 0, 1, 2, max -3 to +3). Positive scores are good for the KC, negative are detrimental.
+3.  Decision Points & Options:
+    *   If \`currentDecisionCount\` < 3, a \`decisionPoint\` object is required.
+    *   If \`currentDecisionCount\` == 3, \`decisionPoint\` MUST be null, and \`scenarioComplete\` MUST be true.
+    *   Each \`decisionPoint\` must have a \`question\` and exactly 4 \`options\`. Each option needs \`text\` and \`kc_impacts\`.
+4.  Schema Adherence: Output MUST be a single, valid JSON object matching the schema. All required fields must be present.
+
+Character PFP and Image Paths:
 - Rani: pfp=/game/character_pfp/rani.png, image=/game/characters/rani.png
 - Ali: pfp=/game/character_pfp/ali.png, image=/game/characters/ali.png
 - Santosh: pfp=/game/character_pfp/santosh.png, image=/game/characters/santosh.png
 - Manju: pfp=/game/character_pfp/manju.png, image=/game/characters/manju.png
 - Rajesh: pfp=/game/character_pfp/rajesh.png, image=/game/characters/rajesh.png
-- Narrator: pfp=/game/character_pfp/narrator.png, image=/game/characters/narrator.png
+- Narrator: pfp=/game/character_pfp/narrator.png (image might be null or a generic scene)
 
 Scenario Characters:
-- Rani: Enthusiastic Mentor
-- Ali: Apprentice/Partner
-- Manju: Govt. Associate/Investor
-- Rajesh: The Competitor 
-- Narrator: Narrates scenario
+- Rani: She is a successful Entrepreneur who is always willing to provide help and guidance. Her persona is exuberant, encouraging, and quick to offer both positive affirmation and constructive feedback.
+- Ali: He is a partner to the player. He is the entrepreneurial vendor who introduces advanced drone technology and leasing models. He also provides the hardware for missions, tasks, and challenges in the game.
+- Santosh: He is a customer and farmer by profession. He also voices the other customers’ feedback and needs on their behalf. His persona is that of a wise elder and community figure with a strong sense of ethics and social responsibility. 
+- Manju: She is an official from a government-backed program or a funding agency that incentivizes agritech innovations—particularly drone leasing. Her role is to acts as a resource for subsidies, grants, or low-interest loans to support entrepreneurs who meet certain criteria (e.g., community impact, sustainable practices).
+- Rajesh: He is a friendly rival and occasional co-learner, representing the typical rural youth eager to learn new tech skills. His role is to encourage healthy competition, which can drive engagement.
 
-Scenario Structure & State Tracking:
-1. Start: narrativeSteps + FIRST decisionPoint (count 0->1).
-2. Decision 1->2: narrativeSteps + SECOND decisionPoint (count 1->2).
-3. Decision 2->3: narrativeSteps + THIRD decisionPoint (count 2->3).
-4. Decision 3->Conclusion: FINAL narrativeSteps + scenarioComplete=true. No further decisions.
 
-Current State (Reflects state *after* the user's latest action):
-- Decisions made so far (by user): ${currentDecisionCount}
-${previousGameState.lastDecisionIndex !== null ? `- Previous decision index chosen by user: ${previousGameState.lastDecisionIndex}`: ''}
-${decisionIndex !== null ? `- User just chose decision option index: ${decisionIndex}` : ''}
+`;
 
-Your Task: Generate the JSON for the *next* step based on the 'Current State'.
+    // Conditional prompt adjustment for first step vs. continuation
+    if (currentDecisionCount === 0 && decisionIndex === null) { // Starting a brand new scenario (first call for this attempt)
+        systemPrompt += "\nThis is the VERY FIRST step of a new scenario. Generate the initial `scenarioContextNarrative`, `scenarioKCsOverall`, `narrativeSteps`, and the first `decisionPoint`.";
+    } else if (decisionIndex !== null) { // User made a choice
+        systemPrompt += `\nThe user chose option index ${decisionIndex}. Generate the consequence in \`narrativeSteps\` and then the next \`decisionPoint\` (if not the 3rd decision) or the conclusion.`;
+    }
 
-Instructions:
-- Progression Logic:
-    - If currentDecisionCount < 3: Respond with narrativeSteps and the *next* decisionPoint. Ensure decisionPoint is not null. Set scenarioComplete=false.
-    - If currentDecisionCount == 3: Respond with the FINAL concluding narrativeSteps ONLY. Set scenarioComplete=true. Ensure decisionPoint is null.
-- Content: Use characters naturally. Dialogue engaging & relevant. Keep segments concise. Paths EXACTLY as specified. Use null for mainCharacterImage if no change. The final narrative step should provide a sense of closure based on the scenario and path taken.
-- *** CRITICAL SCHEMA ADHERENCE ***:
-    - Response MUST be a single valid JSON object matching the provided schema (enforced by \`response_format\`).
-    - Decision Points MUST have exactly 4 options. Each option MUST be an object \`{ "text": "Option text" }\`. decisionPoint MUST be null in the final step.
-    - Remove any reference to 'mcq' or 'feedback' properties in your response.
-    - \`narrativeSteps\` should not be empty unless it's the final feedback step.
-- Output: Ensure all required fields are present, using null where appropriate. No extra text outside the JSON.
-`.trim();
 
-    // --- Step 7: Combine messages ---
     const messagesForOpenAI = [
-      { role: "system", content: systemPrompt },
-      ...(dialogueHistory.length > 0 ? [dialogueHistory[dialogueHistory.length - 1]] : []),
-      ...(decisionIndex !== null ? [{ role: "user", content: `User chose decision index: ${decisionIndex}` }]
-          : dialogueHistory.length === 0 ? [{ role: "user", content: "Start the scenario."}] : []),
+      { role: "system", content: systemPrompt.trim() },
     ];
-    console.log("[/api/lesson] Messages for OpenAI =>", JSON.stringify(messagesForOpenAI, null, 2));
+    // Add last few exchanges from history for context, if they exist
+    if (dialogueHistory.length > 0) {
+        messagesForOpenAI.push(...dialogueHistory.slice(-2)); // Last assistant message and last user action
+    }
+    // Add current user action if any
+    if (decisionIndex !== null) {
+        messagesForOpenAI.push({ role: "user", content: `User chose decision index: ${decisionIndex}. What happens next?` });
+    } else if (currentDecisionCount === 0) {
+        messagesForOpenAI.push({ role: "user", content: "Start the scenario." });
+    }
+    
+    console.log("[/api/lessons] Messages for OpenAI =>", JSON.stringify(messagesForOpenAI, null, 2));
 
-    // --- Step 8: Call OpenAI with Strict JSON Schema Enforcement ---
     const payload = {
-      model: "gpt-4o-2024-08-06",
+      model: "gpt-4o-2024-08-06", // Ensure you use a model supporting json_schema output
       messages: messagesForOpenAI,
       response_format: {
         type: "json_schema",
-        json_schema: { name: "scenario_step", description: "A single step in the narrative scenario.", schema: scenarioStepSchema, strict: true }
+        json_schema: { name: "game_step_generation", description: "Generates a step in the game scenario, including narrative, KCs, and decision points.", schema: gameStepSchemaForAI, strict: true }
       },
       temperature: 0.7,
     };
-    console.log("[/api/lesson] OpenAI Payload =>", JSON.stringify(payload, null, 2));
-    const response = await fetch("https://api.openai.com/v1/chat/completions", { method: "POST", headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiKey}` }, body: JSON.stringify(payload) });
-    console.log("[/api/lesson] OpenAI response status:", response.status);
 
-    // --- Step 9: Extract and Parse JSON content (Improved error handling for non-OK status) ---
+    const response = await fetch("https://api.openai.com/v1/chat/completions", { method: "POST", headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiKey}` }, body: JSON.stringify(payload) });
+
     if (!response.ok) {
         const errorText = await response.text();
-        console.error("[/api/lesson] OpenAI error response text:", errorText);
-        let errorJson; try { errorJson = JSON.parse(errorText); } catch { /* ignore */ }
-        return NextResponse.json({ error: errorJson?.error?.message || `OpenAI API Error: ${response.statusText}` }, { status: response.status });
+        console.error("[/api/lessons] OpenAI error response:", response.status, errorText);
+        return NextResponse.json({ error: `OpenAI API Error: ${response.statusText} - ${errorText}` }, { status: response.status });
     }
+
     const data = await response.json();
-    console.log("[/api/lesson] OpenAI response data =>", JSON.stringify(data, null, 2));
     const content = data?.choices?.[0]?.message?.content;
+
     if (!content) {
-        console.error("[/api/lesson] No content returned from AI model even though status was OK.");
-        return NextResponse.json({ error: "No content returned from AI model (Status OK)" }, { status: 500 });
+        console.error("[/api/lessons] No content in OpenAI response:", data);
+        return NextResponse.json({ error: "No content returned from AI model." }, { status: 500 });
     }
+
     let parsedScenarioStep;
-    try { parsedScenarioStep = JSON.parse(content); }
-    catch (err) { return NextResponse.json({ error: "Could not parse valid JSON returned by AI", content }, { status: 500 }); }
-    console.log("[/api/lesson] Parsed Scenario Step =>", JSON.stringify(parsedScenarioStep, null, 2));
-    if (!parsedScenarioStep || typeof parsedScenarioStep !== 'object' || !('narrativeSteps' in parsedScenarioStep)) {
-      return NextResponse.json({ error: "Received invalid data structure from AI." }, { status: 500 });
+    try {
+      parsedScenarioStep = JSON.parse(content);
+    } catch (err) {
+      console.error("[/api/lessons] Failed to parse JSON from AI:", content, err);
+      return NextResponse.json({ error: "Could not parse valid JSON from AI.", raw_content: content }, { status: 500 });
     }
+    
+    console.log("[/api/lessons] Parsed Scenario Step from AI =>", JSON.stringify(parsedScenarioStep, null, 2));
+    // --- Storing the generated scenario into new DB structure ---
+    // This is a complex part. We need to handle new scenario creation vs. new decision point for an existing scenario.
+    // For simplicity, let's assume each call to /api/lessons *could* generate a full scenario structure,
+    // but the frontend will only display parts of it. The `dialogue_history` in `user_goals` will store the AI's raw JSON output.
+    // The actual saving of granular scenario parts (scenarios, decision_points, options, kc_effects) to their dedicated tables
+    // should happen when a scenario is *first* generated for an attempt.
 
-    // --- Step 10 & 11: Prepare log entry & Upsert Supabase ---
-    const userActionEntry = decisionIndex !== null ? { role: "user", content: `User chose decision index: ${decisionIndex}` }
-         : { role: "user", content: "User initiated scenario or continued." };
-    const assistantEntry = { role: "assistant", content };
-    const updatedDialogue = [...dialogueHistory];
-    if (decisionIndex !== null) { updatedDialogue.push(userActionEntry); }
-    updatedDialogue.push(assistantEntry);
-    const currentProgressValue = parsedScenarioStep.scenarioComplete ? 100
-        : Math.min(95, 5 + (currentDecisionCount * 25));
-    const { error: upsertError } = await supabase.from("user_goals").upsert({
-        user_id: userId, goal_id: focusedGoalId, dialogue_history: updatedDialogue,
-        updated_at: new Date().toISOString(), progress: currentProgressValue,
+    // If it's the start of a new scenario (currentDecisionCount === 0 and decisionIndex is null)
+    // then we save the main scenario shell and its associated KCs.
+    // Decision points and options are saved as they are generated.
+
+    // For now, just update dialogue_history and progress. Granular saving is a larger task.
+    const newDialogueHistoryEntry = { role: "assistant", content }; // The raw JSON from AI
+    const updatedDialogueHistory = [...dialogueHistory];
+    if (decisionIndex !== null) { // Add user's explicit choice if one was made
+        updatedDialogueHistory.push({ role: "user", content: `User chose decision index: ${decisionIndex}` });
+    }
+    updatedDialogueHistory.push(newDialogueHistoryEntry);
+
+
+    // Calculate progress (simplified)
+    let progressValue = 5; // Base progress for starting
+    if (parsedScenarioStep.decisionPoint && parsedScenarioStep.decisionPoint.options) {
+        // Progress increases with each decision point presented, up to the 3rd.
+        // currentDecisionCount is decisions *made*. If AI returns a new DP, it means we are at currentDecisionCount stage.
+        progressValue = 5 + (currentDecisionCount * 30); // e.g. DP1=35, DP2=65, DP3=95
+    }
+    if (parsedScenarioStep.scenarioComplete) {
+      progressValue = 100;
+    }
+    progressValue = Math.min(100, Math.max(0, progressValue));
+
+
+    // Upsert into user_goals
+     const { error: upsertError } = await supabase.from("user_goals").upsert({
+        user_id: userId,
+        goal_id: focusedGoalId,
+        dialogue_history: updatedDialogueHistory,
+        progress: progressValue,
+        updated_at: new Date().toISOString(),
+        // attempts_for_current_goal_cycle is managed elsewhere or when a goal is reset/retried
     }, { onConflict: "user_id,goal_id" });
-    if (upsertError) console.error("Error upserting user_goals:", upsertError);
 
-    // --- Step 12: Return the parsed scenario step ---
+    if (upsertError) {
+        console.error("Error upserting user_goals:", upsertError);
+        // Non-fatal for now, but should be addressed
+    }
+    
+    // --- TODO: More granular saving logic ---
+    // This is where you'd parse `parsedScenarioStep` and save to `scenarios`, `decision_points`, `options`, `option_kc_effects` etc.
+    // This would typically happen:
+    // 1. When a new scenario `scenarioContextNarrative` is generated (currentDecisionCount == 0):
+    //    - Create a new row in `scenarios` table.
+    //    - Link `scenarioKCsOverall` to `scenario_targeted_kcs`.
+    // 2. When a `decisionPoint` is generated:
+    //    - Create a new row in `decision_points` linked to the current scenario.
+    //    - Link `decisionPointKCsFocused` to `decision_point_focused_kcs`.
+    //    - For each option in `decisionPoint.options`:
+    //        - Create a row in `options`.
+    //        - For each `kc_impact` in the option:
+    //            - Create a row in `option_kc_effects`.
+    // This requires careful management of scenario IDs and potentially passing the current `scenario.id` if continuing.
+    // For now, the response is sent back, and the game page consumes it. The `dialogue_history` holds the full AI output.
+
     return NextResponse.json({ scenarioStep: parsedScenarioStep });
 
   } catch (err: any) {
-    console.error("[/api/lesson] Unhandled Route error =>", err);
+    console.error("[/api/lessons] Unhandled Route error =>", err, err.stack);
     return NextResponse.json({ error: err.message || "An internal server error occurred." }, { status: 500 });
   }
 }
