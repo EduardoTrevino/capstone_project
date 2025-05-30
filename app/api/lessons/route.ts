@@ -134,6 +134,33 @@ async function getKCDefinitions() {
     return data || [];
 }
 
+// NEW Helper: Get Metric Definitions and KC-to-Metric Mappings
+async function getMetricAndKcEffectDefinitions() {
+    const { data: metrics, error: metricsError } = await supabase
+        .from('metrics')
+        .select('id, name, data_type, min_value, max_value');
+    if (metricsError) throw new Error(`Failed to fetch metrics: ${metricsError.message}`);
+
+    const { data: kcEffects, error: kcEffectsError } = await supabase
+        .from('kc_metric_effects')
+        .select('kc_id, metric_id');
+    if (kcEffectsError) throw new Error(`Failed to fetch kc_metric_effects: ${kcEffectsError.message}`);
+
+    const { data: kcs, error: kcsError } = await supabase
+        .from('kcs')
+        .select('id, kc_identifier');
+    if (kcsError) throw new Error(`Failed to fetch KCs for mapping: ${kcsError.message}`);
+
+    // Create a map of kc_identifier to kc_id for easier lookup
+    const kcIdentifierToIdMap = new Map(kcs.map(kc => [kc.kc_identifier, kc.id]));
+
+    return {
+        metrics: metrics || [],
+        kcEffects: kcEffects || [],
+        kcIdentifierToIdMap,
+    };
+}
+
 export async function POST(req: NextRequest) {
   try {
     const apiKey = process.env.OPENAI_API_KEY;
