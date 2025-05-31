@@ -26,6 +26,7 @@ export interface UserGoal extends Goal {
   user_goal_id: number | null; // ID from user_goals table
   progress: number;
   dialogue_history: any | null; // Or a more specific type
+  status?: string; // Add status property
 }
 
 interface GoalDialogProps {
