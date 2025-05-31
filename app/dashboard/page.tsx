@@ -1,39 +1,93 @@
 // app/dashboard/page.tsx
 "use client";
 
-import { useState, useEffect } from "react"; // Added useEffect
+import { useState, useEffect, useCallback } from "react";
 import Image from "next/image";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import GoalDialog, { UserGoal } from "@/components/GoalDialog";
 import SettingsDialog from "@/components/SettingsDialog";
-import { supabase } from "@/lib/supabase"; // Import Supabase
-import { Loader2 } from "lucide-react"; // Add Loader2 import
+import { supabase } from "@/lib/supabase";
+import { Loader2 } from "lucide-react";
 
 import MonetaryGrowthWidget from "@/components/widgets/MonetaryGrowthWidget";
 import CustomerSatisfactionWidget from "@/components/widgets/CustomerSatisfactionWidget";
 import QualityReputationWidget from "@/components/widgets/QualityReputationWidget";
 
+// Interfaces (can be moved to a types file if used elsewhere)
+interface MetricDefinition {
+  id: number;
+  name: string;
+  data_type: string;
+  min_value: number | null;
+  max_value: number | null;
+  initial_value: number;
+}
+
+interface MetricScore {
+  current_value: string;
+  metrics: {
+    name: string;
+    initial_value: number;
+  };
+}
+
+// Helper to fetch metric definitions - can be moved to a shared lib file
+async function getMetricDefinitions(): Promise<MetricDefinition[]> {
+  const { data: metricsData, error: metricsError } = await supabase
+      .from('metrics')
+      .select('id, name, data_type, min_value, max_value, initial_value');
+  if (metricsError) {
+    console.error("Failed to fetch metrics in getMetricDefinitions:", metricsError.message)
+    // Instead of throwing, which might crash the component, return empty or handle error appropriately
+    return []; 
+  }
+  return (metricsData || []).map(m => ({ ...m, initial_value: Number(m.initial_value) })) as MetricDefinition[];
+}
+
 /* ---------------------------------------------------------------------- */
 export default function DashboardPage() {
   const router = useRouter();
-  const searchParams = useSearchParams(); // For reading query params from game page
+  const searchParams = useSearchParams();
 
   const [username, setUsername] = useState("Player");
   const [userIdFromStorage, setUserIdFromStorage] = useState<string | null>(null);
   const [avatar, setAvatar] = useState("");
-  // const [cash] = useState(60); // This will come from user_metric_scores
-  const [currentGoal, setCurrentGoal] = useState<UserGoal | null>(null); // Renamed for clarity
-
+  const [currentGoal, setCurrentGoal] = useState<UserGoal | null>(null);
   const [showGoalDialog, setShowGoalDialog] = useState(false);
   const [showSettingsDialog, setShowSettingsDialog] = useState(false);
-  const [isLoadingPageData, setIsLoadingPageData] = useState(true); // For initial data load
+  const [isLoadingPageData, setIsLoadingPageData] = useState(true);
+  const [userLives, setUserLives] = useState(3);
 
   // Placeholder data for widgets until real data is fetched
   const [monetaryData, setMonetaryData] = useState({ data: [0], total: 0 });
-  const [customerSatisfaction, setCustomerSatisfaction] = useState(0);
-  const [reputationScore, setReputationScore] = useState(0);
-  const [userLives, setUserLives] = useState(3);
+  const [customerSatisfaction, setCustomerSatisfaction] = useState(50);
+  const [reputationScore, setReputationScore] = useState(2.5);
+
+  // Add handleGoalSelect function
+  const handleGoalSelect = async (selectedGoal: UserGoal) => {
+    if (!userIdFromStorage) return;
+    
+    try {
+      // Update user's focused goal in the database
+      const { error: updateError } = await supabase
+        .from('users')
+        .update({ focused_goal_id: selectedGoal.id })
+        .eq('id', userIdFromStorage);
+
+      if (updateError) throw updateError;
+
+      // Update local state
+      setCurrentGoal(selectedGoal);
+      setShowGoalDialog(false);
+      
+      // Optionally refresh data to ensure everything is in sync
+      await fetchData(userIdFromStorage);
+    } catch (error: any) {
+      console.error("Error updating focused goal:", error.message);
+      // You might want to show an error message to the user here
+    }
+  };
 
   // Effect 1: Get userId from localStorage on mount
   useEffect(() => {
@@ -41,139 +95,143 @@ export default function DashboardPage() {
     const storedUsername = localStorage.getItem("username");
     if (storedUserId) {
       setUserIdFromStorage(storedUserId);
-
       if (storedUsername) setUsername(storedUsername);
     } else {
-      router.push("/");
+      router.push("/"); // Redirect if no user ID
     }
   }, [router]);
 
-  // Effect 2: Fetch data when userIdFromStorage is available or searchParams change
-  useEffect(() => {
-    if (!userIdFromStorage) {
-      if (!localStorage.getItem("userId")) setIsLoadingPageData(false);
-      return;
-    }
-
-    const fetchData = async () => {
-      setIsLoadingPageData(true);
-      setShowGoalDialog(false);
-      try {
-        const { data: userData, error: userError } = await supabase
-          .from("users")
-          .select("avatar_path, focused_goal_id, lives")
-          .eq("id", userIdFromStorage)
-          .single();
-
-        if (userError) {
-          console.error("Error fetching user data:", userError);
-          if (userError.code === 'PGRST116') router.push('/');
-          throw userError;
-        }
-        
-        if (userData) {
-          setAvatar(userData.avatar_path || "");
-          setUserLives(userData.lives || 0);
-
-          if (searchParams.get('showGoalDialog') === 'true') {
-            setShowGoalDialog(true);
-            setCurrentGoal(null);
-          } else if (!userData.focused_goal_id) {
-            setShowGoalDialog(true);
-            setCurrentGoal(null);
-          } else {
-            const { data: goalData, error: goalError } = await supabase
-              .from("goals")
-              .select("id, name, description, status, user_goals!inner(progress, dialogue_history, user_goal_id:id, status)")
-              .eq("id", userData.focused_goal_id)
-              .eq("user_goals.user_id", userIdFromStorage)
-              .single();
-
-            if (goalError || !goalData) {
-              console.warn("Focused goal not found or user_goals entry missing, showing dialog:", goalError?.message);
-              setShowGoalDialog(true);
-              setCurrentGoal(null);
-            } else {
-              const userGoalEntry = goalData.user_goals[0];
-              setCurrentGoal({
-                id: goalData.id,
-                name: goalData.name,
-                description: goalData.description,
-                progress: userGoalEntry?.progress || 0,
-                dialogue_history: userGoalEntry?.dialogue_history || null,
-                user_goal_id: userGoalEntry?.user_goal_id || null,
-                status: userGoalEntry?.status || 'active',
-              });
-              setShowGoalDialog(false);
-            }
-          }
-        } else {
-          router.push('/');
-        }
-
-      } catch (error: any) {
-        console.error("Error in fetchData dashboard:", error.message);
-      } finally {
-        setIsLoadingPageData(false);
-      }
-    };
-
-    fetchData();
-  }, [userIdFromStorage, searchParams, router]);
-
-  const goalPct = currentGoal?.progress ?? 0;
-
-  async function handleGoalSelect(selectedGoal: UserGoal) {
-    if (!userIdFromStorage) return;
-
-    setCurrentGoal(selectedGoal);
-    setShowGoalDialog(false);
+  // Memoized fetchData to prevent re-creation on every render unless dependencies change
+  const fetchData = useCallback(async (currentUserId: string) => {
+    console.log("Dashboard fetchData triggered for user:", currentUserId);
     setIsLoadingPageData(true);
+    // setShowGoalDialog(false); // Reset goal dialog visibility - Moved this decision into the logic below
 
     try {
-      const { error: updateUserError } = await supabase
+      const { data: userData, error: userError } = await supabase
         .from("users")
-        .update({ focused_goal_id: selectedGoal.id })
-        .eq("id", userIdFromStorage);
-      if (updateUserError) throw updateUserError;
-
-      const { data: upsertedUserGoal, error: upsertUserGoalError } = await supabase
-        .from("user_goals")
-        .upsert({
-            user_id: userIdFromStorage,
-            goal_id: selectedGoal.id,
-            status: 'active',
-            progress: 0,
-            dialogue_history: [],
-            attempts_for_current_goal_cycle: 0,
-        }, { onConflict: 'user_id, goal_id', ignoreDuplicates: false })
-        .select('id, progress, status, dialogue_history, attempts_for_current_goal_cycle')
+        .select("avatar_path, focused_goal_id, lives")
+        .eq("id", currentUserId)
         .single();
 
-      if (upsertUserGoalError) throw upsertUserGoalError;
+      if (userError) {
+        console.error("Error fetching user data in dashboard:", userError);
+        if (userError.code === 'PGRST116') {
+            console.log("User not found in DB, redirecting to login.");
+            router.push('/'); 
+        }
+        setIsLoadingPageData(false);
+        return; 
+      }
+      
+      setAvatar(userData.avatar_path || "");
+      setUserLives(userData.lives ?? 3);
 
-      if (upsertedUserGoal) {
-          setCurrentGoal({
-              ...selectedGoal,
-              user_goal_id: upsertedUserGoal.id,
-              progress: upsertedUserGoal.progress,
-              status: upsertedUserGoal.status,
-              dialogue_history: upsertedUserGoal.dialogue_history,
-          });
+      let shouldShowGoalDialogInitially = false;
+      if (searchParams.get('showGoalDialog') === 'true') {
+        console.log("Dashboard: showGoalDialog query param is true.");
+        shouldShowGoalDialogInitially = true;
+        setCurrentGoal(null); // Clear current goal as user intends to select
+        // Clean the URL parameter after processing
+        router.replace('/dashboard', { scroll: false }); // Next.js 13 App Router way
+      } else if (!userData.focused_goal_id) {
+        console.log("Dashboard: No focused goal ID for user.");
+        shouldShowGoalDialogInitially = true;
+        setCurrentGoal(null);
       } else {
-        setCurrentGoal(selectedGoal);
+        console.log("Dashboard: User has focused_goal_id:", userData.focused_goal_id);
+        const { data: goalDetails, error: goalDetailsError } = await supabase
+          .from("goals")
+          .select(`
+            id, name, description,
+            user_goals!inner (
+              user_goal_id:id, progress, status, dialogue_history, attempts_for_current_goal_cycle
+            )
+          `)
+          .eq("id", userData.focused_goal_id)
+          .eq("user_goals.user_id", currentUserId) // Ensure we get the user_goal for THIS user
+          .single();
+
+        if (goalDetailsError || !goalDetails) {
+          console.warn("Dashboard: Focused goal details not found or user_goals entry missing. Showing dialog.", goalDetailsError?.message);
+          shouldShowGoalDialogInitially = true;
+          setCurrentGoal(null);
+        } else {
+          console.log("Dashboard: Successfully fetched focused goal details:", goalDetails.name);
+          const ugEntry = goalDetails.user_goals[0];
+          setCurrentGoal({
+            id: goalDetails.id,
+            name: goalDetails.name,
+            description: goalDetails.description,
+            user_goal_id: ugEntry.user_goal_id,
+            progress: ugEntry.progress,
+            status: ugEntry.status, // This is crucial for BottomNav logic
+            dialogue_history: ugEntry.dialogue_history,
+          });
+        }
+      }
+      // Only set showGoalDialog if it's not already true from the query param
+      if (!showGoalDialog) {
+        setShowGoalDialog(shouldShowGoalDialogInitially);
+      }
+
+      // Fetch User Metric Scores for Widgets
+      const { data: metricScores, error: metricsError } = await supabase
+        .from('user_metric_scores')
+        .select('current_value, metrics!inner(name, initial_value)')
+        .eq('user_id', currentUserId);
+
+      if (metricsError) {
+        console.error("Error fetching user metric scores for dashboard:", metricsError);
+      } else {
+        let revenueTotal = 0; // Default
+        let csatScore = 50;   // Default
+        let repScore = 2.5;   // Default
+
+        const metricDefinitions = await getMetricDefinitions(); // Get all metric defs to find initial_values
+
+        ((metricScores || []) as unknown as MetricScore[]).forEach(score => {
+            const metricName = score.metrics.name;
+            const value = parseFloat(score.current_value);
+
+            if (metricName === 'Revenue') revenueTotal = value;
+            else if (metricName === 'Customer Satisfaction') csatScore = value;
+            else if (metricName === 'Reputation') repScore = value;
+        });
+        setMonetaryData({ data: [revenueTotal], total: revenueTotal }); // Example: data could be a history for the chart
+        setCustomerSatisfaction(csatScore);
+        setReputationScore(repScore);
+        console.log("Dashboard: Updated widget data - Revenue:", revenueTotal, "CSAT:", csatScore, "Reputation:", repScore);
       }
 
     } catch (error: any) {
-        console.error("Error setting focused goal:", error.message);
-        setCurrentGoal(null);
-        setShowGoalDialog(true);
+      console.error("Error in fetchData (dashboard):", error.message);
+      // Handle other errors, perhaps by showing a generic error message or redirecting
     } finally {
-        setIsLoadingPageData(false);
+      setIsLoadingPageData(false);
+      console.log("Dashboard fetchData finished.");
     }
-  }
+  }, [router, searchParams]); // searchParams is stable, router is stable.
 
-  if (isLoadingPageData && !showGoalDialog) {
+  // Effect 2: Fetch data when userIdFromStorage is available
+  useEffect(() => {
+    if (userIdFromStorage) {
+      fetchData(userIdFromStorage);
+    } else {
+      // If not redirecting yet and no userIdFromStorage, means still waiting for Effect 1 or user truly not logged in.
+      // If localStorage is also empty, then stop loading.
+      if (!localStorage.getItem("userId")) {
+          setIsLoadingPageData(false);
+      }
+    }
+  }, [userIdFromStorage, fetchData]); // fetchData is memoized, searchParams is implicitly handled by fetchData's own dep.
+
+
+  const goalPct = currentGoal?.progress ?? 0;
+
+  // Loading state display: show only if truly loading page data AND dialog isn't meant to be open.
+  // Also don't show loading state when we're just updating the current goal
+  if (isLoadingPageData && !showGoalDialog && !searchParams.get('showGoalDialog') && !currentGoal) {
       return (
           <main
               className="min-h-screen w-full flex items-center justify-center"
@@ -199,7 +257,9 @@ export default function DashboardPage() {
         currentGoalName={currentGoal?.name}
         userLives={userLives}
         onGoalEdit={() => {
-            setCurrentGoal(null);
+            // When clicking edit, we want to show all goals, not just pre-filter to current.
+            // Clearing currentGoal before showing dialog might simplify GoalDialog logic if it fetches all.
+            // However, GoalDialog should fetch all regardless.
             setShowGoalDialog(true);
         }}
       />
@@ -208,8 +268,7 @@ export default function DashboardPage() {
       <div className="flex-1 px-4 mt-10 space-y-10 mx-auto w-full max-w-[600px]">
         <MonetaryGrowthWidget data={monetaryData.data} total={monetaryData.total} />
         <CustomerSatisfactionWidget score={customerSatisfaction} />
-        <QualityReputationWidget/> {/* Added score prop */}
-        {/* <QualityReputationWidget score={reputationScore} /> Added score prop */}
+        <QualityReputationWidget score={reputationScore} />
       </div>
 
       <BottomNav router={router} currentGoal={currentGoal} />
@@ -217,7 +276,15 @@ export default function DashboardPage() {
       {showGoalDialog && userIdFromStorage && (
         <GoalDialog
             userId={userIdFromStorage}
-            onClose={() => setShowGoalDialog(false)}
+            onClose={() => {
+                setShowGoalDialog(false);
+                // If no currentGoal is set after closing, and user didn't select,
+                // they might be stuck without a focused goal.
+                // Re-fetch data to see if backend has a focused_goal_id (e.g. last one they had)
+                if (!currentGoal && userIdFromStorage) {
+                    fetchData(userIdFromStorage);
+                }
+            }}
             onGoalSelect={handleGoalSelect}
         />
       )}
@@ -225,13 +292,15 @@ export default function DashboardPage() {
         <SettingsDialog
           key="settings"
           username={username}
+          // userId={userIdFromStorage} // Pass userId if SettingsDialog updates user table
           initialAvatar={avatar}
-          initialLanguage="english"
-          initialSoundEnabled
+          initialLanguage="english" // TODO: Fetch from user data
+          initialSoundEnabled={true} // TODO: Fetch from user data
           onClose={() => setShowSettingsDialog(false)}
-          onSave={(newAvatar, newLang, newSound) => {
+          onSave={async (newAvatar, newLang, newSound) => { // Make onSave async if it updates DB
             setAvatar(newAvatar);
-            // Update user settings in DB here if SettingsDialog doesn't do it internally
+            // TODO: Update user settings in DB here
+            // await supabase.from('users').update({ avatar_path: newAvatar, language: newLang, sound_enabled: newSound }).eq('id', userIdFromStorage);
           }}
         />
       )}
@@ -255,14 +324,12 @@ interface HeaderProps {
 export function Header({ username, avatar, goalPct, currentGoalName, userLives, onAvatarClick, onLogClick, onGoalEdit }: HeaderProps) {
   return (
     <header className="relative pt-4 pb-2 px-4">
-      {/* avatar */}
       <button onClick={onAvatarClick} className="absolute top-4 left-4 z-20">
         <Avatar className="w-10 h-10 border-2 border-white/60 shadow">
-          {avatar ? <AvatarImage src={avatar} alt={username} /> : <AvatarFallback>{username}</AvatarFallback>}
+          {avatar ? <AvatarImage src={avatar} alt={username} /> : <AvatarFallback>{username?.charAt(0)?.toUpperCase() || 'P'}</AvatarFallback>}
         </Avatar>
       </button>
 
-      {/* log */}
       <button onClick={onLogClick} className="absolute top-4 right-4 z-20 w-10 h-10 hover:scale-110 transition">
         <Image src="/assets/Log/Log_Icon/Log_Icon.png" alt="Log" fill style={{ objectFit: "contain" }} />
       </button>
@@ -271,14 +338,15 @@ export function Header({ username, avatar, goalPct, currentGoalName, userLives, 
         {Array.from({ length: userLives }).map((_, i) => (
           <Image key={i} src="/assets/Business/Lives/heart.svg" alt="heart" width={28} height={28} />
         ))}
-        {Array.from({ length: Math.max(0, 3 - userLives) }).map((_, i) => (
+        {Array.from({ length: Math.max(0, 3 - userLives) }).map((_, i) => ( // Show empty hearts
           <Image key={`empty-${i}`} src="/assets/Business/Lives/heart_empty.svg" alt="empty heart" width={28} height={28} />
         ))}
       </div>
 
-      {/* goal banner */}
       <div className="mx-auto mt-2 w-full max-w-[600px] px-4 py-2 bg-[#FEEED0] rounded-xl border-2 border-[#A03827] shadow-lg flex items-center gap-3 relative z-10">
-        <span className="text-sm font-semibold text-[#1F105C]">{currentGoalName || "No Goal Selected"}</span>
+        <span className="text-sm font-semibold text-[#1F105C] truncate max-w-[150px] sm:max-w-xs" title={currentGoalName || "No Goal Selected"}>
+            {currentGoalName || "No Goal Selected"}
+        </span>
         {currentGoalName && (
           <div className="flex-1 h-3 bg-white/40 rounded-full overflow-hidden">
             <div className="h-full bg-[#CF7F00] transition-all duration-500" style={{ width: `${goalPct}%` }} />
@@ -291,10 +359,15 @@ export function Header({ username, avatar, goalPct, currentGoalName, userLives, 
 }
 
 // ---------------------------- bottom nav ----------------------------
+// (BottomNav should remain the same as your provided version, it correctly uses currentGoal.status)
 export function BottomNav({ router, currentGoal }: { router: any, currentGoal: UserGoal | null }) {
   const handlePlayClick = () => {
-    if (currentGoal?.status === 'completed' || currentGoal?.status === 'failed_needs_retry') {
-      // Pass status AND goalId so game page can fetch the correct summary if needed
+    if (!currentGoal) {
+        // Optionally prompt user to select a goal if none is focused
+        alert("Please select a goal first!");
+        return;
+    }
+    if (currentGoal.status === 'completed' || currentGoal.status === 'failed_needs_retry') {
       router.push(`/dashboard/game?status=${currentGoal.status}&goalId=${currentGoal.id}`);
     } else {
       router.push("/dashboard/game");
@@ -311,7 +384,7 @@ export function BottomNav({ router, currentGoal }: { router: any, currentGoal: U
           <button
             onClick={handlePlayClick}
             className="w-[100px] h-[100px] bg-white rounded-full border-8 border-white flex items-center justify-center hover:scale-110 transition"
-            disabled={!currentGoal}
+            disabled={!currentGoal} // Disable play if no goal is selected/focused
           >
             <Image src="/assets/Navbar/Navbar_GameButton/Navbar_GameButton.png" alt="game" fill style={{ objectFit: "contain" }} />
           </button>
