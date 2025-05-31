@@ -57,6 +57,28 @@ const getCharacterImagePath = (characterName: string | null): string | null => {
     }
 };
 
+// Add this CSS animation at the top of the file, after the imports
+const pulseAnimation = `
+@keyframes pulse-subtle {
+  0% {
+    opacity: 0.6;
+    text-shadow: 0 0 10px rgba(255, 255, 255, 0.3);
+  }
+  50% {
+    opacity: 1;
+    text-shadow: 0 0 20px rgba(255, 255, 255, 0.6);
+  }
+  100% {
+    opacity: 0.6;
+    text-shadow: 0 0 10px rgba(255, 255, 255, 0.3);
+  }
+}
+
+.animate-pulse-subtle {
+  animation: pulse-subtle 2s ease-in-out infinite;
+}
+`;
+
 export default function NarrativeGamePage() {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -300,7 +322,8 @@ export default function NarrativeGamePage() {
 
             if (queue.length === 0) {
                 if (currentStepData?.decisionPoint && !currentStepData.scenarioComplete) {
-                     setTimeout(() => setShowInteractionArea(true), 0);
+                     // Don't show interaction area immediately, wait for next tap
+                     setShowInteractionArea(false);
                 } else if (currentStepData?.scenarioComplete && scenarioSummaryData) {
                      setTimeout(() => {
                         setShowInteractionArea(false);
@@ -315,7 +338,6 @@ export default function NarrativeGamePage() {
         }
         return queue;
     });
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isLoadingApi, messageQueue, currentStepData, scenarioSummaryData]);
 
   const handleScreenClick = useCallback((event: React.MouseEvent<HTMLDivElement>) => {
@@ -323,10 +345,13 @@ export default function NarrativeGamePage() {
        if (target.closest('button, a, [data-interactive="true"]')) {
            return;
        }
-       if (!isLoadingApi && messageQueue.length > 0 && !showInteractionArea) {
+       if (!isLoadingApi && messageQueue.length > 0) {
            handleNextStep();
+       } else if (!isLoadingApi && messageQueue.length === 0 && currentStepData?.decisionPoint && !showInteractionArea) {
+           // Show interaction area on tap when there are no more messages
+           setShowInteractionArea(true);
        }
-   }, [isLoadingApi, messageQueue, showInteractionArea, handleNextStep]);
+   }, [isLoadingApi, messageQueue, showInteractionArea, handleNextStep, currentStepData]);
 
   function handleSelectDecisionOption(index: number) {
     if (isLoadingApi || !showInteractionArea) return;
@@ -414,10 +439,18 @@ export default function NarrativeGamePage() {
           >
             <h2 className="text-2xl font-bold mb-4">Your Current Goal:</h2>
             <p className="text-md leading-relaxed">{goalDescriptionForLoading}</p>
-            <div className="mt-6 flex items-center justify-center">
-              <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-t-2 border-gray-700"></div>
-              <p className="ml-3 text-gray-700 font-semibold">Loading scenario...</p>
-            </div>
+            {isLoadingApi ? (
+              <div className="mt-6 flex items-center justify-center">
+                <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-t-2 border-gray-700"></div>
+                <p className="ml-3 text-gray-700 font-semibold">Loading scenario...</p>
+              </div>
+            ) : (
+              <div className="mt-6">
+                <p className="text-lg font-semibold text-[#A03827] animate-pulse-subtle">
+                  Tap anywhere to play
+                </p>
+              </div>
+            )}
           </div>
         ) : (
           // Fallback if goal description is still loading or failed before scenario load starts
@@ -513,7 +546,9 @@ export default function NarrativeGamePage() {
   return (
     <div
       className="relative w-full h-screen flex flex-col overflow-hidden bg-gray-800"
-      style={{ backgroundImage: `url('${gameBackground!}')`, backgroundSize: 'cover', backgroundPosition: 'center' }}>
+      style={{ backgroundImage: `url('${gameBackground!}')`, backgroundSize: 'cover', backgroundPosition: 'center' }}
+    >
+      <style>{pulseAnimation}</style>
       {/* Top Bar */}
       <div className="absolute top-0 left-0 right-0 z-20 p-3 flex items-center gap-4">
         <DecisionProgressBar currentStep={progressBarCurrentStep} />
@@ -528,7 +563,7 @@ export default function NarrativeGamePage() {
         onClick={handleScreenClick}
       >
         {/* Chat History Area */}
-        <div className="flex-grow overflow-y-auto p-3 md:p-4 scrollbar-thin scrollbar-thumb-gray-400/50 scrollbar-track-transparent">
+        <div className="flex-grow overflow-y-auto p-3 md:p-4 pb-24 md:pb-28 scrollbar-thin scrollbar-thumb-gray-400/50 scrollbar-track-transparent">
           {staggeredMessages.map(msg => (
             msg.character === "User" ? (
               <div key={msg.id} className={`flex items-end gap-2 justify-end animate-fade-in-short mb-6`}>
