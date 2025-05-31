@@ -76,8 +76,13 @@ export default function CustomerSatisfactionWidget({ score }: Props) {
 
       {/* percentage */}
       <div
-        className="absolute text-xs font-semibold -translate-x-1/2"
-        style={{ left: `calc(${pct}% )`, bottom: "8px", color: fillColor }}
+        className="absolute text-xs font-bold -translate-x-1/2 px-1"
+        style={{ 
+          left: `calc(${pct}% )`, 
+          bottom: "8px", 
+          color: fillColor,
+          transform: `translateX(${pct < 10 ? '0%' : pct > 90 ? '-100%' : '-50%'})`
+        }}
       >
         {pct}%
       </div>
