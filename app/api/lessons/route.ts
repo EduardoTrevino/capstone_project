@@ -411,7 +411,7 @@ Character PFP and Image Paths:
 - Santosh: pfp=/game/character_pfp/santosh.png, image=/game/characters/santosh.png
 - Manju: pfp=/game/character_pfp/manju.png, image=/game/characters/manju.png
 - Rajesh: pfp=/game/character_pfp/rajesh.png, image=/game/characters/rajesh.png
-- Narrator: pfp=/game/character_pfp/narrator.png (image might be null or a generic scene)
+- Narrator: pfp=/game/character_pfp/narrator.png image=null
 
 Scenario Characters:
 - Rani: She is a successful Entrepreneur who is always willing to provide help and guidance. Her persona is exuberant, encouraging, and quick to offer both positive affirmation and constructive feedback.
