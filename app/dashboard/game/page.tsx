@@ -7,6 +7,8 @@ import React from 'react';
 import DecisionProgressBar from "@/components/DecisionProgressBar";
 import { ChatMessage } from "@/components/ChatMessage";
 import { supabase } from "@/lib/supabase"; // Import Supabase clien
+import { useSearchParams } from 'next/navigation'; // For reading query params
+import { Loader2 } from 'lucide-react'; // If not already imported
 
 interface NarrativeDialogue {
   character: "Rani" | "Ali" | "Santosh" | "Manju" | "Rajesh" | "Narrator";
@@ -30,6 +32,14 @@ interface DisplayMessage {
   isDecision?: boolean;
 }
 
+// Interface for the data expected in the summary
+interface ScenarioSummary {
+  metricChanges: Array<{ metricName: string; change: number; unit: string; finalValue: number }>;
+  goalStatus: string; // e.g., 'active', 'completed', 'failed_needs_retry'
+  currentGoalProgress: number;
+  scenarioAttemptNumber: number; // The attempt number that was just completed
+}
+
 // --- Helper Function to Map Character Name to Image Path (Unchanged) ---
 const getCharacterImagePath = (characterName: string | null): string | null => {
     if (!characterName) return null;
@@ -49,6 +59,7 @@ const getCharacterImagePath = (characterName: string | null): string | null => {
 
 export default function NarrativeGamePage() {
   const router = useRouter();
+  const searchParams = useSearchParams();
 
   // --- State ---
   const [currentStepData, setCurrentStepData] = useState<ScenarioStep | null>(null);
@@ -65,6 +76,11 @@ export default function NarrativeGamePage() {
   const [userId, setUserId] = useState<string>("");
   const [decisionCount, setDecisionCount] = useState(0);
   const [isComplete, setIsComplete] = useState(false);
+  // Add new state for scenario summary data
+  const [scenarioSummaryData, setScenarioSummaryData] = useState<ScenarioSummary | null>(null);
+  const [showSummaryScreen, setShowSummaryScreen] = useState(false);
+  const [currentFocusedGoalId, setCurrentFocusedGoalId] = useState<number | null>(null);
+  const [currentGoalName, setCurrentGoalName] = useState<string | null>(null); // For summary title
 
   // --- Refs ---
   const messagesEndRef = useRef<null | HTMLDivElement>(null);
@@ -81,95 +97,115 @@ export default function NarrativeGamePage() {
       return;
     }
     setUserId(storedUserId);
+    // Reset game state for a fresh load or goal switch
+    setCurrentStepData(null);
     setStaggeredMessages([]);
+    setMessageQueue([]);
+    setShowInteractionArea(false);
+    setMainCharacterImage(null);
+    setError(null);
+    setSelectedDecisionOption(null);
     setDecisionCount(0);
-    setIsInitialLoading(true); // Explicitly set to true
+    setIsComplete(false);
+    setShowSummaryScreen(false);
+    setScenarioSummaryData(null);
+    setIsLoadingApi(false);
+    setIsInitialLoading(true);
 
-    async function fetchGoalDescriptionAndLoadScenario() {
-        try {
-            const { data: userData, error: userErr } = await supabase
-                .from('users')
-                .select('focused_goal_id')
-                .eq('id', storedUserId)
-                .single();
+    const goalStatusFromQuery = searchParams.get('status');
+    const goalIdFromQuery = searchParams.get('goalId');
 
-            if (userErr || !userData || !userData.focused_goal_id) {
-                console.error("Could not fetch user's focused goal", userErr);
-                setError("Could not load goal information. Please try again.");
-                setIsInitialLoading(false); // Stop loading if goal info fails
-                return;
-            }
-
-            const { data: goalData, error: goalErr } = await supabase
-                .from('goals')
-                .select('description')
-                .eq('id', userData.focused_goal_id)
-                .single();
-
-            if (goalErr || !goalData) {
-                console.error("Could not fetch goal description", goalErr);
-                setGoalDescriptionForLoading("Goal details could not be loaded.");
-            } else {
-                setGoalDescriptionForLoading(goalData.description || "No goal description available.");
-            }
-        } catch (e: any) {
-            console.error("Error fetching initial goal data:", e);
-            setGoalDescriptionForLoading("Error loading goal details.");
-        } finally {
-            // Now load the scenario itself, isInitialLoading will be set to false
-            // by loadScenarioStep or its error handling.
-            if (storedUserId) {
-                loadScenarioStep(null, storedUserId);
-            }
+    async function initializeGamePage() {
+      let focusedGoalIdToLoad: number | null = null;
+      try {
+        // Determine the goal to load/summarize
+        if (goalIdFromQuery && (goalStatusFromQuery === 'completed' || goalStatusFromQuery === 'failed_needs_retry')) {
+          focusedGoalIdToLoad = parseInt(goalIdFromQuery);
+        } else {
+          const { data: userData, error: userErr } = await supabase.from('users').select('focused_goal_id').eq('id', storedUserId).single();
+          if (userErr || !userData?.focused_goal_id) throw new Error("User has no focused goal or error fetching user.");
+          focusedGoalIdToLoad = userData.focused_goal_id;
         }
-    }
+        
+        if (!focusedGoalIdToLoad) throw new Error("Could not determine goal to load.");
+        setCurrentFocusedGoalId(focusedGoalIdToLoad);
 
-    fetchGoalDescriptionAndLoadScenario();
+        const { data: goalData, error: goalErr } = await supabase.from('goals').select('name, description').eq('id', focusedGoalIdToLoad).single();
+        if (goalErr || !goalData) throw new Error(`Could not fetch goal details for ID ${focusedGoalIdToLoad}.`);
+        setGoalDescriptionForLoading(goalData.description || "No description.");
+        setCurrentGoalName(goalData.name);
+
+        if (goalStatusFromQuery === 'completed' || goalStatusFromQuery === 'failed_needs_retry') {
+          // Show summary for already completed/failed goal
+          const { data: userGoalEntry, error: ugError } = await supabase
+              .from('user_goals')
+              .select('dialogue_history, status, progress, attempts_for_current_goal_cycle')
+              .eq('user_id', storedUserId)
+              .eq('goal_id', focusedGoalIdToLoad)
+              .single();
+
+          if (ugError || !userGoalEntry) throw new Error("Could not load prior game summary data.");
+
+          // For metric changes, ideally this would be stored, or we reconstruct/show a generic message
+          setScenarioSummaryData({
+              metricChanges: [], // Or try to parse from last dialogue if you store it there
+              goalStatus: userGoalEntry.status,
+              currentGoalProgress: userGoalEntry.progress,
+              scenarioAttemptNumber: userGoalEntry.attempts_for_current_goal_cycle,
+          });
+          setShowSummaryScreen(true);
+          setIsComplete(true); // Mark as "done" for UI logic
+          setIsInitialLoading(false);
+        } else {
+          // Regular scenario load for an active goal
+          loadScenarioStep(null, storedUserId);
+        }
+      } catch (e: any) {
+        console.error("Error during game page initialization:", e.message);
+        setError(`Initialization Error: ${e.message}`);
+        setGoalDescriptionForLoading("Error loading details."); // Show error in loading screen
+        setIsInitialLoading(false); // Stop loading on error
+      }
+    }
+    initializeGamePage();
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [router]); // Removed loadScenarioStep from here, it's called internally now
+  }, [searchParams, router]);
 
   // Handle new scenario step data
   useEffect(() => {
-    if (!isLoadingApi && (currentStepData || error)) { // If API is not loading AND we have data OR an error
-      if (isInitialLoading) {
-          setIsInitialLoading(false);
-      }
-  }
-    if (!currentStepData || isLoadingApi) return;
+    if (isLoadingApi) return; // Don't process if API is currently loading a new step
 
-    setShowInteractionArea(false);
-    setIsInitialLoading(false);
+    if (currentStepData) { // We have new step data
+        if (isInitialLoading) setIsInitialLoading(false); // Turn off initial loader if it was on
+        
+        setShowInteractionArea(false);
 
-    let stepImage = null;
-    if (currentStepData.mainCharacterImage?.startsWith('/')) {
-        stepImage = currentStepData.mainCharacterImage;
-    } else if (currentStepData.narrativeSteps?.[0]) {
-       stepImage = getCharacterImagePath(currentStepData.narrativeSteps[0].character);
-    }
-    if (stepImage !== mainCharacterImage) {
-       setMainCharacterImage(stepImage);
-    }
+        let stepImage = currentStepData.mainCharacterImage; // Prefer direct image
+        if (!stepImage && currentStepData.narrativeSteps?.[0]) {
+           stepImage = getCharacterImagePath(currentStepData.narrativeSteps[0].character);
+        }
+        if (stepImage !== mainCharacterImage) setMainCharacterImage(stepImage);
+        if (currentStepData.decisionPoint) setSelectedDecisionOption(null);
 
-    if (currentStepData.decisionPoint) {
-        setSelectedDecisionOption(null);
+        if (currentStepData.narrativeSteps?.length > 0) {
+          setMessageQueue([...currentStepData.narrativeSteps]);
+        } else { // No narrative steps from AI for this turn
+          setMessageQueue([]);
+          if (currentStepData.decisionPoint && !currentStepData.scenarioComplete) {
+              setTimeout(() => setShowInteractionArea(true), 50);
+          } else if (currentStepData.scenarioComplete && scenarioSummaryData) {
+              // Scenario is complete by AI AND no narrative steps AND summary data is ready
+              setIsComplete(true);
+              setShowSummaryScreen(true);
+          } else if (currentStepData.scenarioComplete && !scenarioSummaryData) {
+              console.warn("Scenario complete but summary data not yet processed. Waiting for loadScenarioStep to set it.");
+              // This case should be rare if loadScenarioStep always sets summaryData on complete
+          }
+        }
+        if (currentStepData.scenarioComplete) setIsComplete(true); // Mark internal flag
+    } else if (error && !isLoadingApi) { // Error occurred, and not currently loading new data
+        if (isInitialLoading) setIsInitialLoading(false);
     }
-
-    if (currentStepData.narrativeSteps?.length > 0) {
-      setMessageQueue([...currentStepData.narrativeSteps]);
-    } else {
-      setMessageQueue([]);
-      if (currentStepData.decisionPoint || currentStepData.scenarioComplete) {
-          setTimeout(() => setShowInteractionArea(true), 50);
-      }
-    }
-
-    if (currentStepData.scenarioComplete) {
-      setIsComplete(true);
-    }
-    if (currentStepData.error) {
-      setError(currentStepData.error);
-    }
-
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentStepData, error, isLoadingApi]);
 
@@ -184,7 +220,7 @@ export default function NarrativeGamePage() {
 
   // --- Core Logic Functions ---
 
-  const loadScenarioStep = useCallback(async (decisionIndex: number | null, uid: string) => {
+  const loadScenarioStep = useCallback(async (decisionIndexParam: number | undefined | null, uid: string | null) => {
     if (!uid) {
       setError("User ID is missing.");
       setIsInitialLoading(false);
@@ -194,11 +230,13 @@ export default function NarrativeGamePage() {
     setError(null);
     setShowInteractionArea(false);
     setMessageQueue([]);
+    // Do not set setIsInitialLoading(false) here, it's handled by the useEffect watching currentStepData/error
 
     try {
       const res = await fetch("/api/lessons", {
-        method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ userId: uid, decisionIndex })
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ userId: uid, decisionIndex: decisionIndexParam })
       });
       const responseText = await res.text();
       if (!res.ok) {
@@ -210,16 +248,30 @@ export default function NarrativeGamePage() {
       if (data.error) throw new Error(data.error);
 
       setCurrentStepData(data.scenarioStep);
+      setDecisionCount(data.currentDecisionCountInScenario || 0);
+
+      if (data.scenarioStep.scenarioComplete) {
+        setScenarioSummaryData({
+            metricChanges: data.metricChangesSummary || [],
+            goalStatus: data.goalStatusAfterStep,
+            currentGoalProgress: data.currentGoalProgress,
+            scenarioAttemptNumber: data.scenarioAttemptNumber,
+        });
+      } else {
+        setScenarioSummaryData(null); // Clear if not complete
+        setShowSummaryScreen(false);  // Hide summary if starting/continuing scenario
+      }
+
     } catch (err: any) {
       console.error("loadScenarioStep error:", err);
       setError(err.message || "Failed to load step.");
       setCurrentStepData(null);
     } finally {
       setIsLoadingApi(false);
-      if (isInitialLoading) setIsInitialLoading(false); 
+      // isInitialLoading is set to false in the useEffect watching currentStepData or error
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isInitialLoading]); // Removed userId dependency as it's passed in
+  }, []);
 
   const handleNextStep = useCallback(() => {
     if (isLoadingApi || messageQueue.length === 0) return;
@@ -229,14 +281,8 @@ export default function NarrativeGamePage() {
         const nextMessageToShow = queue.shift();
 
         if (nextMessageToShow) {
-            const stepImageProvided = currentStepData?.mainCharacterImage?.startsWith('/');
-            if (!stepImageProvided) {
-                const charImage = getCharacterImagePath(nextMessageToShow.character);
-                setMainCharacterImage(prevMainImage => {
-                    if (charImage !== prevMainImage) return charImage;
-                    return prevMainImage;
-                });
-            }
+            const charImage = getCharacterImagePath(nextMessageToShow.character);
+            setMainCharacterImage(charImage);
 
             setStaggeredMessages(prev => {
                 const lastMsg = prev[prev.length - 1];
@@ -246,16 +292,22 @@ export default function NarrativeGamePage() {
                 return [...prev, {
                     id: messageIdCounter.current++,
                     character: nextMessageToShow.character,
-                    // Use the pfp from the dialogue step for the message avatar
-                    pfp: nextMessageToShow.pfp, // Ensure API provides this
+                    pfp: nextMessageToShow.pfp,
                     text: nextMessageToShow.text,
                     isDecision: false
                 }];
             });
 
-            if (queue.length === 0 && currentStepData && (currentStepData.decisionPoint || currentStepData.scenarioComplete)) {
-                 setTimeout(() => setShowInteractionArea(true), 0);
-            } else if (queue.length > 0) {
+            if (queue.length === 0) {
+                if (currentStepData?.decisionPoint && !currentStepData.scenarioComplete) {
+                     setTimeout(() => setShowInteractionArea(true), 0);
+                } else if (currentStepData?.scenarioComplete && scenarioSummaryData) {
+                     setTimeout(() => {
+                        setShowInteractionArea(false);
+                        setShowSummaryScreen(true);
+                     }, 100);
+                }
+            } else {
                  setShowInteractionArea(false);
             }
 
@@ -264,7 +316,7 @@ export default function NarrativeGamePage() {
         return queue;
     });
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isLoadingApi, messageQueue, currentStepData]); // Removed userId dependency
+  }, [isLoadingApi, messageQueue, currentStepData, scenarioSummaryData]);
 
   const handleScreenClick = useCallback((event: React.MouseEvent<HTMLDivElement>) => {
        const target = event.target as HTMLElement;
@@ -290,33 +342,51 @@ export default function NarrativeGamePage() {
     setStaggeredMessages(prev => [...prev, {
       id: messageIdCounter.current++, character: "User", pfp: null, text: `I choose: "${choiceText}"`, isDecision: true
     }]);
-    setDecisionCount(c => c + 1);
     setSelectedDecisionOption(null);
-    setShowInteractionArea(false);
     await loadScenarioStep(decisionIndexToSubmit, userId);
   }
 
-  function handleEndScenario() {
+  // --- New Handlers for Summary Screen Buttons ---
+  const handleNextScenario = async () => {
+    if (!userId || !currentFocusedGoalId) return;
+    console.log("handleNextScenario called");
+
+    setIsInitialLoading(true);
+    setCurrentStepData(null);
+    setStaggeredMessages([]);
+    setMessageQueue([]);
+    setShowInteractionArea(false);
+    setMainCharacterImage(null);
+    setError(null);
+    setSelectedDecisionOption(null);
+    setIsComplete(false);
+    setShowSummaryScreen(false);
+    setScenarioSummaryData(null);
+    
+    await loadScenarioStep(null, userId);
+  };
+
+  const handleSelectNewGoal = () => {
+    router.push("/dashboard?showGoalDialog=true");
+  };
+
+  const handleEndScenario = () => {
     router.push("/dashboard");
-  }
+  };
 
   // --- Visibility Flags ---
-  const isShowingDecisionOpt = showInteractionArea && currentStepData?.decisionPoint && !isComplete;
-  const isShowingCompletion = showInteractionArea && isComplete;
+  const isShowingDecisionOpt = showInteractionArea && !showSummaryScreen && currentStepData?.decisionPoint && !isComplete;
 
   // --- Calculate currentStep for new ProgressBar (4 steps: D1, D2, D3, Finish) ---
-  let progressBarCurrentStep = 1;
-  if (decisionCount === 1) {
-    progressBarCurrentStep = 2;
-  } else if (decisionCount === 2) {
-    progressBarCurrentStep = 3;
-  } else if (decisionCount >= 3 || isComplete) {
-    progressBarCurrentStep = 4;
+  let progressBarCurrentStep = decisionCount + 1; // If decisionCount is 0 (start), step is 1. If 1, step 2 etc.
+  if (isComplete || decisionCount >= 3) { // isComplete flag also set when scenarioComplete from API
+      progressBarCurrentStep = 4;
   }
+  progressBarCurrentStep = Math.min(4, Math.max(1, progressBarCurrentStep));
 
   // --- Render ---
 
-  if (error && !isInitialLoading) { /* Error rendering unchanged */
+  if (error && !isInitialLoading) {
     return (
       <div className="flex items-center justify-center min-h-screen bg-red-100 text-gray-800">
         <div className="bg-white p-6 rounded-lg shadow-xl text-center max-w-md border border-red-300">
@@ -330,7 +400,7 @@ export default function NarrativeGamePage() {
     );
   }
 
-   if (isInitialLoading) { /* Initial loading unchanged */
+   if (isInitialLoading && !showSummaryScreen) {
     return (
       <div
         className="flex items-center justify-center min-h-screen w-full p-4"
@@ -360,20 +430,91 @@ export default function NarrativeGamePage() {
     );
   }
 
-   // ========================================================================
-   // LAYOUT STRUCTURE CHANGE:
-   // - Outer container uses flex-col.
-   // - Top bar is absolute.
-   // - Main content area takes remaining space (flex-grow) and is ALSO flex-col.
-   // - Chat history *within* main content uses flex-grow and overflow-y-auto.
-   // - A new fixed-height 'bottom-area' holds the Character Image and Interaction Area.
-   // ========================================================================
-   return (
+  if (showSummaryScreen && scenarioSummaryData) {
+    const { metricChanges, goalStatus, currentGoalProgress, scenarioAttemptNumber } = scenarioSummaryData;
+    const goalCompletedOverall = goalStatus === 'completed';
+    const maxAttemptsForGoalCycle = 3;
+    const attemptsUsed = scenarioAttemptNumber;
+    const canPlayNextScenario = !goalCompletedOverall && attemptsUsed < maxAttemptsForGoalCycle;
+
+    return (
+        <div
+            className="absolute inset-0 z-30 flex items-center justify-center p-4 backdrop-blur-sm bg-black/30"
+            style={{
+                backgroundImage: `url('${gameBackground!}')`,
+                backgroundSize: 'cover',
+                backgroundPosition: 'center',
+            }}
+        >
+            <div className="bg-[#FEECCF] text-black p-6 md:p-8 rounded-xl shadow-2xl max-w-lg w-full text-center animate-fade-in">
+                <h2 className="text-2xl font-bold mb-2 text-[#A03827]">
+                    {goalCompletedOverall ? `${currentGoalName || 'Goal'} Achieved!` : `Scenario ${attemptsUsed} Complete!`}
+                </h2>
+                <p className="text-sm text-gray-700 mb-4">
+                    Overall Goal Progress: <span className="font-semibold">{currentGoalProgress}%</span>
+                </p>
+
+                {metricChanges && metricChanges.length > 0 ? (
+                    <div className="my-4 text-left space-y-1 max-h-48 overflow-y-auto p-2 border border-gray-300 rounded-md bg-white/50">
+                        <p className="font-semibold mb-2 text-gray-800">Performance This Scenario:</p>
+                        {metricChanges.map((mc, index) => (
+                            <p key={index} className={`text-sm ${mc.change >= 0 ? 'text-green-700' : 'text-red-700'}`}>
+                                {mc.metricName}: {mc.change >= 0 ? '+' : ''}{mc.change % 1 !== 0 ? mc.change.toFixed(2) : mc.change}{mc.unit}
+                                <span className="text-xs text-gray-500 ml-2">(Now: {mc.finalValue % 1 !== 0 ? mc.finalValue.toFixed(2) : mc.finalValue}{mc.unit})</span>
+                            </p>
+                        ))}
+                    </div>
+                ) : (
+                    <p className="my-4 text-sm text-gray-600">No direct metric changes recorded this scenario, but your choices are shaping your journey!</p>
+                )}
+
+                {goalCompletedOverall && (
+                    <p className="my-4 font-semibold text-green-600">Congratulations! You've successfully completed the goal: "{currentGoalName || 'This Goal'}"!</p>
+                )}
+                {!goalCompletedOverall && attemptsUsed < maxAttemptsForGoalCycle && (
+                     <p className="my-4 text-sm text-gray-700">You have {maxAttemptsForGoalCycle - attemptsUsed} scenario(s) remaining for this goal.</p>
+                )}
+                 {!goalCompletedOverall && attemptsUsed >= maxAttemptsForGoalCycle && (
+                     <p className="my-4 text-sm text-red-600">You've used all scenarios for this goal attempt. You can retry the goal from the dashboard if you have lives.</p>
+                )}
+
+                <div className="mt-6 space-y-3">
+                    <button
+                        onClick={handleEndScenario}
+                        className="w-full px-6 py-2.5 bg-gray-500 text-white rounded-lg text-sm font-bold hover:bg-gray-600 focus:outline-none focus:ring-2 focus:ring-gray-400 shadow-lg transform hover:scale-105 transition-all duration-150 ease-in-out"
+                    >
+                        Return to Dashboard
+                    </button>
+
+                    {goalCompletedOverall ? (
+                        <button
+                            onClick={handleSelectNewGoal}
+                            className="w-full px-6 py-2.5 bg-blue-600 text-white rounded-lg text-sm font-bold hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 shadow-lg transform hover:scale-105 transition-all duration-150 ease-in-out"
+                        >
+                            Select a New Goal
+                        </button>
+                    ) : (
+                        canPlayNextScenario && (
+                            <button
+                                onClick={handleNextScenario}
+                                className="w-full px-6 py-2.5 bg-green-500 text-white rounded-lg text-sm font-bold hover:bg-green-600 focus:outline-none focus:ring-2 focus:ring-green-400 shadow-lg transform hover:scale-105 transition-all duration-150 ease-in-out"
+                            >
+                                Next Scenario
+                            </button>
+                        )
+                    )}
+                </div>
+            </div>
+        </div>
+    );
+  }
+
+  // Main Game UI
+  return (
     <div
       className="relative w-full h-screen flex flex-col overflow-hidden bg-gray-800"
-      style={{ backgroundImage: `url(/game/bgs/bg_1.png)`, backgroundSize: 'cover', backgroundPosition: 'center' }}>
-
-      {/* --- Top Bar (Unchanged) --- */}
+      style={{ backgroundImage: `url('${gameBackground!}')`, backgroundSize: 'cover', backgroundPosition: 'center' }}>
+      {/* Top Bar */}
       <div className="absolute top-0 left-0 right-0 z-20 p-3 flex items-center gap-4">
         <DecisionProgressBar currentStep={progressBarCurrentStep} />
         <div className="shrink-0 p-2 rounded-full cursor-pointer hover:bg-white/20 transition-colors" data-interactive="true">
@@ -381,110 +522,101 @@ export default function NarrativeGamePage() {
         </div>
       </div>
 
-      {/* --- Main Content Area --- Takes up space BELOW top bar */}
-      {/* Added overflow-hidden here to prevent potential parent scrollbars */}
+      {/* Main Content Area */}
       <div
-        className="flex-grow flex flex-col pt-16 md:pt-20 overflow-hidden cursor-pointer" // Use flex-grow, flex-col, add overflow-hidden
-        onClick={handleScreenClick} // Click handler on the whole area (excluding bottom interactive elements)
+        className="flex-grow flex flex-col pt-16 md:pt-20 overflow-hidden cursor-pointer"
+        onClick={handleScreenClick}
       >
-
-        {/* --- Chat History Area --- Grows to fill space ABOVE the bottom area */}
-        <div className="flex-grow overflow-y-auto p-3 md:p-4 scrollbar-thin scrollbar-thumb-gray-400/50 scrollbar-track-transparent"> {/* REMOVED space-y-3 */}
+        {/* Chat History Area */}
+        <div className="flex-grow overflow-y-auto p-3 md:p-4 scrollbar-thin scrollbar-thumb-gray-400/50 scrollbar-track-transparent">
           {staggeredMessages.map(msg => (
             msg.character === "User" ? (
-              // --- Keep existing User message rendering ---
-              // Added mb-6 to match the new component's bottom margin for consistency
               <div key={msg.id} className={`flex items-end gap-2 justify-end animate-fade-in-short mb-6`}>
-                {/* Placeholder div */}
                 <div className="w-8 md:w-10 shrink-0"></div>
                 <div className={`max-w-[75%] md:max-w-[65%] px-3 py-2 rounded-xl shadow-md bg-[#BBD9A1] text-[#214104] rounded-br-none`}>
-                  {/* Removed user name display from bubble if it existed */}
                   <p className={`text-sm leading-relaxed break-words`}>{msg.text}</p>
                 </div>
               </div>
             ) : (
-              // --- Use new ChatMessage component for AI/Character messages ---
               <ChatMessage
                 key={msg.id}
                 message={msg.text}
                 name={msg.character}
-                // Ensure pfp is passed, provide empty string as fallback for component's placeholder
                 avatarUrl={msg.pfp || ''}
-                // Let the component handle the fallback text generation (e.g., first letter of name)
-                className="animate-fade-in-short mb-14" // Added mb-6 for consistent spacing with user messages
+                className="animate-fade-in-short mb-14"
               />
             )
           ))}
-          {/* Loading Indicator (Unchanged) */}
-          {isLoadingApi && !isInitialLoading && ( <div className="flex items-center justify-center p-4"> <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-gray-400"></div> <span className="text-sm text-gray-400 italic ml-2">Loading...</span> </div> )}
-          {/* Scroll Target (Unchanged) */}
-          <div ref={messagesEndRef} /> {/* Scroll target */}
+          {isLoadingApi && !isInitialLoading && (
+            <div className="flex items-center justify-center p-4">
+              <Loader2 className="h-5 w-5 animate-spin text-gray-400"/>
+              <span className="text-sm text-gray-400 italic ml-2">Loading...</span>
+            </div>
+          )}
+          <div ref={messagesEndRef} />
         </div>
-        {/* ================== END CHAT HISTORY AREA ================== */}
 
-        {/* --- Bottom Area (Character Image + Interactions) --- Fixed Height */}
-        {/* This container has a fixed height and prevents the chat from flowing into it */}
-        <div className="relative flex-shrink-0 h-[40vh] md:h-[45vh]"> {/* ** NEW CONTAINER ** - `relative` for absolute children, `flex-shrink-0` to prevent shrinking, fixed `h-[]` */}
-
-            {/* --- Character Image Area --- Positioned absolutely WITHIN the bottom-area */}
-            <div className="absolute inset-0 flex justify-start items-end pointer-events-none pb-2 md:pb-4 pl-4"> {/* Changed justify-center to justify-start and added pl-4 */}
+        {/* Bottom Area */}
+        <div className="relative flex-shrink-0 h-[40vh] md:h-[45vh]">
+            {/* Character Image Area */}
+            <div className="absolute inset-0 flex justify-start items-end pointer-events-none pb-2 md:pb-4 pl-4">
               {mainCharacterImage && (
                   <Image
-                      key={mainCharacterImage} // Re-trigger animation on image change
+                      key={mainCharacterImage}
                       src={mainCharacterImage}
                       alt="Current Character"
-                      width={350} // Increased from 250
-                      height={500} // Increased from 400
+                      width={350}
+                      height={500}
                       className="object-contain max-h-full animate-fade-in drop-shadow-lg"
-                      priority // Load primary character images eagerly
+                      priority
                   />
               )}
             </div>
-
-            {/* --- Interaction Area Container --- Positioned absolutely AT THE BOTTOM of the bottom-area */}
+            
+            {/* Interaction Area Container */}
             <div
                className={`absolute inset-x-0 bottom-0 p-3 z-10 flex flex-col justify-end items-center
                            transition-opacity duration-300 ease-in-out ${
-                           showInteractionArea ? "opacity-100" : "opacity-0 pointer-events-none"
+                           isShowingDecisionOpt ? "opacity-100" : "opacity-0 pointer-events-none"
                            }`}
-               onClick={(e) => e.stopPropagation()} // Prevent clicks inside from triggering handleScreenClick
-               style={{ cursor: 'default' }} // Reset cursor for this area
-               data-interactive="true" // Mark as interactive for handleScreenClick check
+               onClick={(e) => e.stopPropagation()}
+               style={{ cursor: 'default' }}
+               data-interactive="true"
             >
-                {/* Options / Feedback Container - With translucent background */}
                 <div className={`w-full max-w-xl mx-auto space-y-3 p-4 rounded-lg bg-[#66943C] backdrop-blur-sm shadow-lg`}>
-
-                  {/* Decision Point Options */}
                   {isShowingDecisionOpt && currentStepData?.decisionPoint && (
                     <>
-                      {/* Question Text */}
                       <p className="font-semibold text-sm mb-3 text-center text-white [text-shadow:0_1px_2px_rgba(0,0,0,0.5)] px-2">
                         {currentStepData.decisionPoint.question}
                       </p>
-                      {/* Options Grid */}
                       <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                        {currentStepData.decisionPoint.options.map((opt, idx) => ( <button key={idx} onClick={() => handleSelectDecisionOption(idx)} className={`p-2.5 rounded-lg border-2 text-sm text-left transition-all duration-150 ease-in-out w-full focus:outline-none ${selectedDecisionOption === idx ? "border-yellow-400 bg-yellow-500/30 shadow-lg scale-[1.03] text-yellow-100 ring-2 ring-yellow-300/70" : "border-gray-400 bg-[#BBD9A1] hover:bg-[#BBD9A1]/90 text-[#214104] hover:border-gray-500 hover:scale-[1.02]"}`}>{opt.text}</button> ))}
+                        {currentStepData.decisionPoint.options.map((opt, idx) => (
+                          <button
+                            key={idx}
+                            onClick={() => handleSelectDecisionOption(idx)}
+                            className={`p-2.5 rounded-lg border-2 text-sm text-left transition-all duration-150 ease-in-out w-full focus:outline-none ${
+                              selectedDecisionOption === idx
+                                ? "border-yellow-400 bg-yellow-500/30 shadow-lg scale-[1.03] text-yellow-100 ring-2 ring-yellow-300/70"
+                                : "border-gray-400 bg-[#BBD9A1] hover:bg-[#BBD9A1]/90 text-[#214104] hover:border-gray-500 hover:scale-[1.02]"
+                            }`}
+                          >
+                            {opt.text}
+                          </button>
+                        ))}
                       </div>
-                      {/* Confirm Button */}
-                      <button onClick={submitDecision} disabled={selectedDecisionOption === null || isLoadingApi} className="w-full mt-2 px-4 py-2 bg-gradient-to-r from-green-500 to-emerald-600 text-white rounded-lg text-sm font-bold hover:from-green-600 hover:to-emerald-700 focus:outline-none focus:ring-2 focus:ring-green-500 focus:ring-opacity-50 disabled:opacity-60 disabled:cursor-not-allowed disabled:scale-100 disabled:hover:from-green-500 shadow-lg transform hover:scale-[1.03] transition-all duration-150 ease-in-out">Confirm Choice</button>
+                      <button
+                        onClick={submitDecision}
+                        disabled={selectedDecisionOption === null || isLoadingApi}
+                        className="w-full mt-2 px-4 py-2 bg-gradient-to-r from-green-500 to-emerald-600 text-white rounded-lg text-sm font-bold hover:from-green-600 hover:to-emerald-700 focus:outline-none focus:ring-2 focus:ring-green-500 focus:ring-opacity-50 disabled:opacity-60 disabled:cursor-not-allowed disabled:scale-100 disabled:hover:from-green-500 shadow-lg transform hover:scale-[1.03] transition-all duration-150 ease-in-out"
+                      >
+                        Confirm Choice
+                      </button>
                     </>
                   )}
-
-                  {/* Scenario Completion Message (Only shown if NOT showing decision options) */}
-                  {isShowingCompletion && (
-                    <div className="text-center animate-fade-in w-full">
-                      <p className="font-semibold text-lg text-yellow-300 mb-4 drop-shadow">Scenario Complete!</p>
-                      <button onClick={handleEndScenario} className="px-8 py-2.5 bg-gradient-to-r from-purple-500 to-pink-600 text-white rounded-lg text-sm font-bold hover:from-purple-600 hover:to-pink-700 focus:outline-none focus:ring-2 focus:ring-purple-500 focus:ring-opacity-50 shadow-lg transform hover:scale-105 transition-all duration-150 ease-in-out">Return to Dashboard</button>
-                    </div>
-                  )}
-                </div> {/* End Options/Feedback Container */}
-
-            </div> {/* End Interaction Area Container */}
-
-        </div> {/* --- End Bottom Area --- */}
-
-      </div> {/* --- End Main Content Area --- */}
-
-    </div> // End Page Container
+                </div>
+            </div>
+        </div>
+      </div>
+    </div>
   );
 }
