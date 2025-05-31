@@ -2,7 +2,15 @@
 
 import Image from "next/image";
 
-export default function QualityReputationWidget() {
+interface Props {
+  score: number;
+}
+
+export default function QualityReputationWidget({ score }: Props) {
+  // Calculate filled stars based on score (0-5)
+  const filledStars = Math.min(5, Math.max(0, score));
+  const hasHalfStar = filledStars % 1 >= 0.5;
+
   return (
     <section className="relative w-full bg-[#FEEED0] border-2 border-[#A03827] rounded-2xl mx-auto py-8 flex flex-col items-center justify-center">
       {/* heading */}
@@ -17,14 +25,14 @@ export default function QualityReputationWidget() {
             {/* base grey star */}
             <Image src="/assets/Business/Quality&Reputation/star.svg" alt="star" fill />
             {/* overlay filled part */}
-            {(i < 2 || i === 2) && (
+            {(i < Math.floor(filledStars) || (i === Math.floor(filledStars) && hasHalfStar)) && (
               <div
                 className="absolute inset-0"
                 style={{
                   background: "#FFC709",
                   WebkitMask: "url('/assets/Business/Quality&Reputation/star.svg') center / contain no-repeat",
                   mask: "url('/assets/Business/Quality&Reputation/star.svg') center / contain no-repeat",
-                  clipPath: i === 2 ? "inset(0 50% 0 0)" : undefined,
+                  clipPath: (i === Math.floor(filledStars) && hasHalfStar) ? "inset(0 50% 0 0)" : undefined,
                 }}
               />
             )}
