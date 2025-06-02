@@ -326,11 +326,11 @@ export async function POST(req: NextRequest) {
 
                 let rawMetricChange = 0; let unit = "";
                 switch (metricDef.name) {
-                    case 'Revenue': rawMetricChange = kcChange.change * 500; unit = "₹"; break; // Increased impact
-                    case 'Customer Satisfaction': rawMetricChange = kcChange.change * 5; unit = "%"; break;
-                    case 'Reputation': rawMetricChange = kcChange.change * 0.25; unit = " stars"; break;
-                    case 'Ethical Decision Making': rawMetricChange = kcChange.change * 7; unit = "%"; break; // Slightly higher impact
-                    case 'Risk-Taking': rawMetricChange = kcChange.change * 10; unit = "%"; break;
+                    case 'Revenue': rawMetricChange = kcChange.change * 450; unit = "₹"; break; // Increased impact
+                    case 'Customer Satisfaction': rawMetricChange = kcChange.change * 2; unit = "%"; break;
+                    case 'Reputation': rawMetricChange = kcChange.change * 0.15; unit = " stars"; break;
+                    case 'Ethical Decision Making': rawMetricChange = kcChange.change * 2; unit = "%"; break; // Slightly higher impact
+                    case 'Risk-Taking': rawMetricChange = kcChange.change * 2; unit = "%"; break;
                     default: rawMetricChange = kcChange.change * 2; unit = "%";
                 }
 
