@@ -222,6 +222,18 @@ export async function POST(req: NextRequest) {
             const metricDef = (await getDefinitionsBundle()).metrics.find(md => md.id === m.metric_id);
             if(metricDef) initialBaselines[metricDef.name] = Number(m.current_value);
         }));
+        const revenueMetricDefForInit = (await getDefinitionsBundle()).metrics.find(m => m.name === 'Revenue');
+        if (revenueMetricDefForInit && initialBaselines.hasOwnProperty('Revenue')) {
+            await supabase.from('user_metric_history').insert({
+                user_id: userId,
+                goal_id: focusedGoalId, // The goal ID being started
+                metric_id: revenueMetricDefForInit.id,
+                scenario_attempt_number: 1, // First attempt
+                decision_number: 0,         // State before any decisions in this attempt
+                value: initialBaselines['Revenue'],
+                recorded_at: new Date().toISOString()
+            });        
+        }
 
         const { data: newUserGoalData, error: insertError } = await supabase
             .from('user_goals')
@@ -362,6 +374,8 @@ export async function POST(req: NextRequest) {
             }
         }
     }
+
+
     // --- Build the dynamic system prompt ---
     // The system prompt needs to adapt based on whether it's a new scenario or continuation
     let systemPrompt = `You are an expert scenario generator for an educational business simulation game.
@@ -489,6 +503,37 @@ Scenario Characters:
     }
     
     console.log("[/api/lessons] Parsed Scenario Step from AI =>", JSON.stringify(parsedScenarioStep, null, 2));
+
+    // Log Revenue to history after this turns decision
+    if (decisionIndex !== null) { // Only log if a decision was actually processed this turn
+        const revenueMetricDef = definitions.metrics.find(m => m.name === 'Revenue');
+        if (revenueMetricDef) {
+            const revenueSummary = metricChangesSummary.find(s => s.metricName === 'Revenue');
+            if (revenueSummary) {
+                // currentDecisionCount is the count of decisions made *before* this current one.
+                // So, the decision number for the history entry is currentDecisionCount + 1.
+                const decisionNumberForHistoryLog = currentDecisionCount + 1;
+    
+                // Ensure it's a valid decision number (1, 2, or 3)
+                if (decisionNumberForHistoryLog >= 1 && decisionNumberForHistoryLog <= 3) {
+                    console.log(`[HistoryLogging] Logging revenue for SAttempt: ${scenarioAttemptNumber}, DecisionNo: ${decisionNumberForHistoryLog}, Value: ${revenueSummary.finalValue}`);
+                    await supabase.from('user_metric_history').insert({
+                        user_id: userId,
+                        goal_id: focusedGoalId,
+                        metric_id: revenueMetricDef.id,
+                        scenario_attempt_number: scenarioAttemptNumber,
+                        decision_number: decisionNumberForHistoryLog,
+                        value: revenueSummary.finalValue,
+                        recorded_at: new Date().toISOString()
+                    });
+                } else {
+                    console.warn(`[HistoryLogging] Attempted to log with invalid decisionNumber: ${decisionNumberForHistoryLog}`);
+                }
+            }
+        }
+    }
+
+
     // --- Storing the generated scenario into new DB structure ---
     // This is a complex part. We need to handle new scenario creation vs. new decision point for an existing scenario.
     // For simplicity, let's assume each call to /api/lessons *could* generate a full scenario structure,
@@ -609,6 +654,28 @@ Scenario Characters:
       console.log(`[/api/lessons] Starting new scenario attempt ${scenarioAttemptNumber}. Clearing dialogue history for this attempt.`);
       finalDialogueHistoryForDB = [newDialogueHistoryEntry]; // Start fresh with only the AI's first message of new scenario
       console.log(`[/api/lessons] initial_metric_baselines (which is now our goal cycle baseline) will NOT be updated for this new scenario attempt.`);
+      // Fetch current Revenue to record as the start of this new scenario attempt
+        const revenueMetricDefForNewAttempt = definitions.metrics.find(m => m.name === 'Revenue');
+        if (revenueMetricDefForNewAttempt) {
+            const { data: currentRevenueScore } = await supabase
+                .from('user_metric_scores')
+                .select('current_value')
+                .eq('user_id', userId)
+                .eq('metric_id', revenueMetricDefForNewAttempt.id)
+                .single();
+            
+            if (currentRevenueScore) {
+                await supabase.from('user_metric_history').insert({
+                    user_id: userId,
+                    goal_id: focusedGoalId,
+                    metric_id: revenueMetricDefForNewAttempt.id,
+                    scenario_attempt_number: scenarioAttemptNumber, // The new attempt number
+                    decision_number: 0,                            // State before decisions in this new attempt
+                    value: parseFloat(currentRevenueScore.current_value as any),
+                    recorded_at: new Date().toISOString()
+                });
+            }
+        }
     }
       
       // Also, re-snapshot baselines if there are "increase" type goals.
