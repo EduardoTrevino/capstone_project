@@ -393,7 +393,7 @@ Detailed Instructions:
 2.  KCs:
     *   \`scenarioKCsOverall\`: IF \`currentDecisionCount\` is 0, select 1-3 KC identifiers from the list that this entire scenario attempt will focus on. Otherwise,  MUST be an empty array \`[]\`.
     *   \`decisionPointKCsFocused\`: For each \`decisionPoint\`, select 1-3 relevant KC identifiers.
-    *   \`kc_impacts\` (within each option): Assign 1-3 KCs. Scores should be small integers (e.g., -2, -1, 0, 1, 2, max -3 to +3). Positive scores are good for the KC, negative are detrimental.
+    *   \`kc_impacts\` (within each option): Assign 1-3 KCs. Scores should be small integers (e.g., -2, -1, 0, 1, 2, max -3 to +3). Positive scores are good for the KC, negative are detrimental, options can have a balance of both ++, --, -+, +- etc. .
 3.  Decision Points & Options:
     *   If \`currentDecisionCount\` < 3, a \`decisionPoint\` object is required.
     *   If \`currentDecisionCount\` == 3, \`decisionPoint\` MUST be null, and \`scenarioComplete\` MUST be true.
