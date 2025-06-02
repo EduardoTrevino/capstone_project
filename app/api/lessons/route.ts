@@ -114,11 +114,12 @@ interface DialogueEntry {
     role: 'user' | 'assistant' | 'system';
     content: string;
   }
-  interface WinConditionItem {
+
+interface WinConditionItem {
     metric_name: string;
     operator: ">=" | "<=" | ">" | "<" | "==" | "=";
     value: number;
-    type?: "increase" | "increase_from_new_bundle"; // For special handling
+    type?: "absolute" | "change_from_baseline"; // For special handling
     is_profit_proxy?: boolean; // If this revenue condition actually represents profit
 }
 
@@ -535,38 +536,50 @@ Scenario Characters:
 
         for (let i = 0; i < conditions.length; i++) {
             const condition = conditions[i];
-            let currentValue = currentUserMetrics.get(condition.metric_name) ?? 0;
-            const targetValue = condition.value;
+            let effectiveCurrentValue = currentUserMetrics.get(condition.metric_name) ?? 0;
+            const targetValueOrDelta = condition.value;
             let conditionMet = false;
+            let valueToCompare = effectiveCurrentValue; // This will be the value checked against targetValueOrDelta
 
-            if (condition.type === "increase" || condition.type === "increase_from_new_bundle") {
+
+            if (condition.type === "change_from_baseline") {
                 const baseline = Number(initialMetricBaselines[condition.metric_name] || 0);
-                currentValue = currentValue - baseline; // Check the increase from baseline
-                console.log(`[WinCheck-Increase] Metric: ${condition.metric_name}, Current Increase: ${currentValue}, Baseline: ${baseline}, Target Increase: ${targetValue}`);
+                valueToCompare = effectiveCurrentValue - baseline; // This is the actual change from baseline
+                console.log(`[WinCheck-ChangeBaseline] Metric: ${condition.metric_name}, CurrentRaw: ${effectiveCurrentValue}, Baseline: ${baseline}, ActualChange: ${valueToCompare}, TargetChangeOrDelta: ${targetValueOrDelta}`);
+            } else { // "absolute" type (or type omitted)
+                valueToCompare = effectiveCurrentValue;
+                console.log(`[WinCheck-Absolute] Metric: ${condition.metric_name}, CurrentValue: ${valueToCompare}, TargetValue: ${targetValueOrDelta}`);
             }
 
-            if (condition.operator === ">=") conditionMet = currentValue >= targetValue;
-            else if (condition.operator === "<=") conditionMet = currentValue <= targetValue;
-            else if (condition.operator === ">") conditionMet = currentValue > targetValue;
-            else if (condition.operator === "<") conditionMet = currentValue < targetValue;
-            else if (condition.operator === "==" || condition.operator === "=") conditionMet = currentValue === targetValue;
+            // Common operator check using valueToCompare and targetValueOrDelta
+            if (condition.operator === ">=") conditionMet = valueToCompare >= targetValueOrDelta;
+            else if (condition.operator === "<=") conditionMet = valueToCompare <= targetValueOrDelta;
+            else if (condition.operator === ">") conditionMet = valueToCompare > targetValueOrDelta;
+            else if (condition.operator === "<") conditionMet = valueToCompare < targetValueOrDelta;
+            else if (condition.operator === "==" || condition.operator === "=") conditionMet = valueToCompare === targetValueOrDelta;
             
             if (!conditionMet) allConditionsMet = false;
 
-            if (targetValue > 0 || (targetValue === 0 && condition.operator.includes("="))) { // Handle non-zero targets and zero targets with equality
-                let progressForCondition = (targetValue !== 0 ? (currentValue / targetValue) : (currentValue === 0 ? 1 : 0)) * (100 / conditions.length);
-                if (condition.operator.includes("=")) {
-                     progressForCondition = Math.min(100 / conditions.length, progressForCondition);
+
+            // Progress calculation:
+            // Simplified: if condition is met, full progress part. If not, for positive target deltas/values, proportional. Else 0.
+            let conditionProgressRatio = 0.0; // Represents progress for this condition, from 0.0 to 1.0
+
+            if (conditionMet) {
+                conditionProgressRatio = 1.0;
+            } else {
+                // Calculate partial progress only if not met and applicable
+                // Applicable for "positive target and current is positive but less" scenarios
+                if (targetValueOrDelta > 0 && valueToCompare > 0 && 
+                    (condition.operator.includes(">") || condition.operator.includes("="))) {
+                    conditionProgressRatio = valueToCompare / targetValueOrDelta;
                 }
-                 conditionsProgressParts[i] = Math.max(0, progressForCondition);
-            } else if (targetValue < 0) { // Handle negative targets (e.g. reduce loss to < -1000)
-                 // Progress for negative targets can be tricky, e.g. how far are you from *not* exceeding a negative limit
-                 // For simplicity, if met, full part, else 0 for this complex case.
-                 conditionsProgressParts[i] = conditionMet ? (100 / conditions.length) : 0;
+                // For other "not met" cases (e.g., target is 0 or negative, or operator is '<'), partial progress is 0.
             }
+            conditionProgressRatio = Math.max(0, Math.min(1, conditionProgressRatio)); // Clamp to [0,1]
+            conditionsProgressParts[i] = conditionProgressRatio * (100 / conditions.length);
 
-
-            console.log(`[WinCheck] Metric: ${condition.metric_name}, Current: ${currentValue}, Operator: ${condition.operator}, Target: ${targetValue}, Met: ${conditionMet}, ProgressPart: ${conditionsProgressParts[i]}`);
+            console.log(`[WinCheckDetails] Metric: ${condition.metric_name}, Type: ${condition.type || 'absolute'}, ValueToCompare: ${valueToCompare.toFixed(2)}, Op: ${condition.operator}, Target: ${targetValueOrDelta.toFixed(2)}, Met: ${conditionMet}, ProgressPartRaw: ${conditionProgressRatio.toFixed(2)}, FinalProgressContr: ${conditionsProgressParts[i].toFixed(2)}`);
         }
         goalAchieved = allConditionsMet;
         goalProgressValue = Math.round(conditionsProgressParts.reduce((sum, p) => sum + p, 0));
@@ -595,24 +608,26 @@ Scenario Characters:
     if (decisionIndex === null && scenarioAttemptNumber > completedAttemptsForCycle && completedAttemptsForCycle > 0) { // Starting a genuinely new attempt after a previous one
       console.log(`[/api/lessons] Starting new scenario attempt ${scenarioAttemptNumber}. Clearing dialogue history for this attempt.`);
       finalDialogueHistoryForDB = [newDialogueHistoryEntry]; // Start fresh with only the AI's first message of new scenario
+      console.log(`[/api/lessons] initial_metric_baselines (which is now our goal cycle baseline) will NOT be updated for this new scenario attempt.`);
+    }
       
       // Also, re-snapshot baselines if there are "increase" type goals.
-      const { data: currentMetricsForNewBaseline } = await supabase
-            .from('user_metric_scores')
-            .select('metric_id, current_value')
-            .eq('user_id', userId);
+    //   const { data: currentMetricsForNewBaseline } = await supabase
+    //         .from('user_metric_scores')
+    //         .select('metric_id, current_value')
+    //         .eq('user_id', userId);
         
-      const newInitialBaselines: {[key: string]: number} = {};
-      (currentMetricsForNewBaseline || []).forEach(m => {
-          const metricDef = definitions.metrics.find(md => md.id === m.metric_id);
-          if(metricDef) newInitialBaselines[metricDef.name] = Number(m.current_value);
-      });
-      // Update userGoalData with new baselines
-      if (userGoalData) {
-          userGoalData.initial_metric_baselines = newInitialBaselines;
-          console.log(`[/api/lessons] Updated initial_metric_baselines for new attempt:`, newInitialBaselines);
-      }
-    }
+    //   const newInitialBaselines: {[key: string]: number} = {};
+    //   await Promise.all((currentMetricsForNewBaseline || []).map(async m => {
+    //     const metricDef = definitions.metrics.find(md => md.id === m.metric_id); 
+    //     if(metricDef) newInitialBaselines[metricDef.name] = Number(m.current_value);
+    //   }));
+    //   // Update userGoalData with new baselines
+    //   if (userGoalData) {
+    //       userGoalData.initial_metric_baselines = newInitialBaselines;
+    //       console.log(`[/api/lessons] Updated initial_metric_baselines for new attempt:`, newInitialBaselines);
+    //   }
+    // }
 
 
     const { error: upsertError } = await supabase.from("user_goals").upsert({
