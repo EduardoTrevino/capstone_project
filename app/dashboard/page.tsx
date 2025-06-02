@@ -24,11 +24,10 @@ interface MetricDefinition {
   initial_value: number;
 }
 
-interface MetricScore {
+interface MetricScoreData {
   current_value: string;
   metrics: {
     name: string;
-    initial_value: number;
   };
 }
 
@@ -60,9 +59,9 @@ export default function DashboardPage() {
   const [userLives, setUserLives] = useState(3);
 
   // Placeholder data for widgets until real data is fetched
-  const [monetaryData, setMonetaryData] = useState({ data: [0], total: 0 });
-  const [customerSatisfaction, setCustomerSatisfaction] = useState(50);
-  const [reputationScore, setReputationScore] = useState(2.5);
+  const [monetaryData, setMonetaryData] = useState({ data: [] as number[], total: 0 }); // Ensure data is number[]
+  const [customerSatisfaction, setCustomerSatisfaction] = useState(0);
+  const [reputationScore, setReputationScore] = useState(0);
 
   // Add handleGoalSelect function
   const handleGoalSelect = async (selectedGoal: UserGoal) => {
@@ -127,11 +126,14 @@ export default function DashboardPage() {
       setAvatar(userData.avatar_path || "");
       setUserLives(userData.lives ?? 3);
 
+      let focusedGoalIdForProcessing: number | null = userData.focused_goal_id;
+
       let shouldShowGoalDialogInitially = false;
       if (searchParams.get('showGoalDialog') === 'true') {
         console.log("Dashboard: showGoalDialog query param is true.");
         shouldShowGoalDialogInitially = true;
         setCurrentGoal(null); // Clear current goal as user intends to select
+        focusedGoalIdForProcessing = null;
         // Clean the URL parameter after processing
         router.replace('/dashboard', { scroll: false }); // Next.js 13 App Router way
       } else if (!userData.focused_goal_id) {
@@ -156,6 +158,7 @@ export default function DashboardPage() {
           console.warn("Dashboard: Focused goal details not found or user_goals entry missing. Showing dialog.", goalDetailsError?.message);
           shouldShowGoalDialogInitially = true;
           setCurrentGoal(null);
+          focusedGoalIdForProcessing = null;
         } else {
           console.log("Dashboard: Successfully fetched focused goal details:", goalDetails.name);
           const ugEntry = goalDetails.user_goals[0];
@@ -168,6 +171,7 @@ export default function DashboardPage() {
             status: ugEntry.status, // This is crucial for BottomNav logic
             dialogue_history: ugEntry.dialogue_history,
           });
+          focusedGoalIdForProcessing = goalDetails.id;
         }
       }
       // Only set showGoalDialog if it's not already true from the query param
@@ -176,42 +180,118 @@ export default function DashboardPage() {
       }
 
       // Fetch User Metric Scores for Widgets
-      const { data: metricScores, error: metricsError } = await supabase
+      // const { data: metricScores, error: metricsError } = await supabase
+      //   .from('user_metric_scores')
+      //   .select('current_value, metrics!inner(name, initial_value)')
+      //   .eq('user_id', currentUserId);
+
+      // if (metricsError) {
+      //   console.error("Error fetching user metric scores for dashboard:", metricsError);
+      // } else {
+      //   let revenueTotal = 0; // Default
+      //   let csatScore = 50;   // Default
+      //   let repScore = 2.5;   // Default
+
+      //   const metricDefinitions = await getMetricDefinitions(); // Get all metric defs to find initial_values
+
+      //   ((metricScores || []) as unknown as MetricScore[]).forEach(score => {
+      //       const metricName = score.metrics.name;
+      //       const value = parseFloat(score.current_value);
+
+      //       if (metricName === 'Revenue') revenueTotal = value;
+      //       else if (metricName === 'Customer Satisfaction') csatScore = value;
+      //       else if (metricName === 'Reputation') repScore = value;
+      //   });
+
+      // Fetch current metric scores for CSAT and Reputation
+      const { data: currentMetricScoresData, error: metricsError } = await supabase
         .from('user_metric_scores')
-        .select('current_value, metrics!inner(name, initial_value)')
-        .eq('user_id', currentUserId);
+        .select('current_value, metrics!inner(name)') // No need for initial_value here
+        .eq('user_id', currentUserId)
+        .in('metrics.name', ['Customer Satisfaction', 'Reputation']); // Fetch only relevant metrics
+
+      let csatScore = 0;
+      let repScore = 0;
 
       if (metricsError) {
-        console.error("Error fetching user metric scores for dashboard:", metricsError);
-      } else {
-        let revenueTotal = 0; // Default
-        let csatScore = 50;   // Default
-        let repScore = 2.5;   // Default
-
-        const metricDefinitions = await getMetricDefinitions(); // Get all metric defs to find initial_values
-
-        ((metricScores || []) as unknown as MetricScore[]).forEach(score => {
-            const metricName = score.metrics.name;
-            const value = parseFloat(score.current_value);
-
-            if (metricName === 'Revenue') revenueTotal = value;
-            else if (metricName === 'Customer Satisfaction') csatScore = value;
-            else if (metricName === 'Reputation') repScore = value;
+        console.error("Error fetching CSAT/Reputation scores:", metricsError);
+      } else if (currentMetricScoresData) {
+        ((currentMetricScoresData as unknown) as MetricScoreData[]).forEach(score => {
+          const value = parseFloat(score.current_value);
+          if (score.metrics.name === 'Customer Satisfaction') csatScore = value;
+          else if (score.metrics.name === 'Reputation') repScore = value;
         });
-        setMonetaryData({ data: [revenueTotal], total: revenueTotal }); // Example: data could be a history for the chart
-        setCustomerSatisfaction(csatScore);
-        setReputationScore(repScore);
-        console.log("Dashboard: Updated widget data - Revenue:", revenueTotal, "CSAT:", csatScore, "Reputation:", repScore);
       }
+      setCustomerSatisfaction(csatScore);
+      setReputationScore(repScore);
+
+      // --- Logic for MonetaryGrowthWidget using user_metric_history ---
+      const allMetricDefinitions = await getMetricDefinitions();
+      const revenueMetricDefForWidget = allMetricDefinitions.find(m => m.name === 'Revenue');
+      
+      let fetchedRevenueHistoryValues: number[] = [];
+      let latestRevenueTotalForWidget: number = 0;
+
+      // Try to get latest revenue from user_metric_scores as a fallback or initial single point
+      const currentRevenueScoreEntry = ((currentMetricScoresData as unknown) as MetricScoreData[] || []).find(
+        s => s.metrics.name === 'Revenue'
+      ) || (await supabase.from('user_metric_scores').select('current_value, metrics!inner(name)').eq('user_id', currentUserId).eq('metrics.name', 'Revenue').single()).data as MetricScoreData | null;
+
+      if (currentRevenueScoreEntry) {
+          latestRevenueTotalForWidget = parseFloat(currentRevenueScoreEntry.current_value);
+      }
+      // Default to one point if no history or other data
+      fetchedRevenueHistoryValues = [latestRevenueTotalForWidget];
+
+
+      if (revenueMetricDefForWidget && currentUserId && focusedGoalIdForProcessing) {
+          const { data: revenueHistoryData, error: historyFetchError } = await supabase
+              .from('user_metric_history')
+              .select('value') 
+              .eq('user_id', currentUserId)
+              .eq('goal_id', focusedGoalIdForProcessing) // Use the determined goal ID
+              .eq('metric_id', revenueMetricDefForWidget.id)
+              .order('scenario_attempt_number', { ascending: true })
+              .order('decision_number', { ascending: true });
+
+          if (historyFetchError) {
+              console.error("Error fetching revenue history for widget:", historyFetchError.message);
+              // Fallback already handled by initializing with current score
+          } else if (revenueHistoryData && revenueHistoryData.length > 0) {
+              fetchedRevenueHistoryValues = revenueHistoryData.map(entry => parseFloat(entry.value as any));
+              if (fetchedRevenueHistoryValues.length > 0) {
+                latestRevenueTotalForWidget = fetchedRevenueHistoryValues[fetchedRevenueHistoryValues.length - 1];
+              }
+              console.log("Dashboard: Fetched revenue history for widget:", fetchedRevenueHistoryValues);
+          } else {
+              console.log("Dashboard: No revenue history found for goal, using current/default value for widget.");
+              // Fallback already handled by initializing with current score
+          }
+      } else {
+          console.log("Dashboard: Conditions not met to fetch revenue history (no revenue def, user, or goal). Using current/default.");
+          // Fallback already handled
+      }
+      
+      // Ensure data always has at least one point for the chart, even if it's 0 or the initial value
+      if (fetchedRevenueHistoryValues.length === 0) {
+        const revenueInitial = revenueMetricDefForWidget?.initial_value ?? 0;
+        fetchedRevenueHistoryValues = [latestRevenueTotalForWidget || revenueInitial];
+        if (latestRevenueTotalForWidget === 0 && revenueInitial !== 0) { // Prioritize current if non-zero
+            latestRevenueTotalForWidget = revenueInitial;
+        }
+      }
+
+
+      setMonetaryData({ data: fetchedRevenueHistoryValues, total: latestRevenueTotalForWidget });
 
     } catch (error: any) {
       console.error("Error in fetchData (dashboard):", error.message);
-      // Handle other errors, perhaps by showing a generic error message or redirecting
     } finally {
       setIsLoadingPageData(false);
       console.log("Dashboard fetchData finished.");
     }
-  }, [router, searchParams]); // searchParams is stable, router is stable.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [router, searchParams, showGoalDialog]); // showGoalDialog influences logic, so keep it.
 
   // Effect 2: Fetch data when userIdFromStorage is available
   useEffect(() => {
