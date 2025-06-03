@@ -10,6 +10,8 @@ import { supabase } from "@/lib/supabase"; // Import Supabase clien
 import { useSearchParams } from 'next/navigation'; // For reading query params
 import { Loader2 } from 'lucide-react'; // If not already imported
 
+export const maxDuration = 300;
+
 interface NarrativeDialogue {
   character: "Rani" | "Ali" | "Santosh" | "Manju" | "Rajesh" | "Narrator";
   pfp: string;

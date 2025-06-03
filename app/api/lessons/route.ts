@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabase } from "@/lib/supabase"; // Ensure this is your admin client for writes
 
+export const maxDuration = 300;
+
 
 // Define the NEW structure for the JSON response we expect from OpenAI
 const gameStepSchemaForAI = {
