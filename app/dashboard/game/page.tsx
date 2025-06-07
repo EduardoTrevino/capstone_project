@@ -52,7 +52,7 @@ const getCharacterImagePath = (characterName: string | null): string | null => {
         case 'santosh':      return `${basePath}santosh.png`;
         case 'manju':     return `${basePath}manju.png`;
         case 'rajesh':     return `${basePath}rajesh.png`;
-        case 'narrator':  return `${basePath}narrator.png`; // Assuming you might want a narrator image
+        case 'narrator':  return null; // Assuming you might want a narrator image
         default:
             console.warn(`Mapping not found for character image: ${characterName}`);
             return null; // Return null for narrator or unknown characters
