@@ -84,6 +84,8 @@ const pulseAnimation = `
 export default function NarrativeGamePage() {
   const router = useRouter();
   const searchParams = useSearchParams();
+  const goalStatusFromQuery = searchParams.get('status');
+  const goalIdFromQuery = searchParams.get('goalId');
 
   // --- State ---
   const [currentStepData, setCurrentStepData] = useState<ScenarioStep | null>(null);
@@ -105,6 +107,8 @@ export default function NarrativeGamePage() {
   const [showSummaryScreen, setShowSummaryScreen] = useState(false);
   const [currentFocusedGoalId, setCurrentFocusedGoalId] = useState<number | null>(null);
   const [currentGoalName, setCurrentGoalName] = useState<string | null>(null); // For summary title
+  // new: whether we should auto-advance the next message
+  const [shouldAutoAdvance, setShouldAutoAdvance] = useState(false);
 
   // --- Refs ---
   const messagesEndRef = useRef<null | HTMLDivElement>(null);
@@ -136,8 +140,7 @@ export default function NarrativeGamePage() {
     setIsLoadingApi(false);
     setIsInitialLoading(true);
 
-    const goalStatusFromQuery = searchParams.get('status');
-    const goalIdFromQuery = searchParams.get('goalId');
+    
 
     async function initializeGamePage() {
       let focusedGoalIdToLoad: number | null = null;
@@ -182,7 +185,7 @@ export default function NarrativeGamePage() {
           setIsInitialLoading(false);
         } else {
           // Regular scenario load for an active goal
-          loadScenarioStep(null, storedUserId);
+          await loadScenarioStep(null, storedUserId);
         }
       } catch (e: any) {
         console.error("Error during game page initialization:", e.message);
@@ -193,7 +196,7 @@ export default function NarrativeGamePage() {
     }
     initializeGamePage();
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [searchParams, router]);
+  }, [goalStatusFromQuery, goalIdFromQuery, router]);
 
   // Handle new scenario step data
   useEffect(() => {
@@ -274,6 +277,9 @@ export default function NarrativeGamePage() {
       setCurrentStepData(data.scenarioStep);
       setDecisionCount(data.currentDecisionCountInScenario || 0);
 
+      // new: auto-advance the first message from this new batch
+      setShouldAutoAdvance(true);
+
       if (data.scenarioStep.scenarioComplete) {
         setScenarioSummaryData({
             metricChanges: data.metricChangesSummary || [],
@@ -341,6 +347,18 @@ export default function NarrativeGamePage() {
         return queue;
     });
   }, [isLoadingApi, messageQueue, currentStepData, scenarioSummaryData]);
+
+  // new: auto-advance the very first message after loading finishes
+  useEffect(() => {
+    if (
+      shouldAutoAdvance &&
+      !isLoadingApi &&
+      messageQueue.length > 0
+    ) {
+      handleNextStep();
+      setShouldAutoAdvance(false);
+    }
+  }, [shouldAutoAdvance, isLoadingApi, messageQueue, handleNextStep]);
 
   const handleScreenClick = useCallback((event: React.MouseEvent<HTMLDivElement>) => {
        const target = event.target as HTMLElement;
@@ -586,8 +604,8 @@ export default function NarrativeGamePage() {
           ))}
           {isLoadingApi && !isInitialLoading && (
             <div className="flex items-center justify-center p-4">
-              <Loader2 className="h-5 w-5 animate-spin text-gray-400"/>
-              <span className="text-sm text-gray-400 italic ml-2">Loading...</span>
+              <Loader2 className="h-5 w-5 animate-spin text-white"/>
+              <span className="text-sm text-white italic ml-2">Evaluating your decision...</span>
             </div>
           )}
           <div ref={messagesEndRef} />
