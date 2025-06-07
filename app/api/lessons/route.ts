@@ -444,10 +444,24 @@ Scenario Characters:
     if (currentDecisionCount === 0 && decisionIndex === null) {
         systemPrompt += "\nTask: Generate the initial context, overall KCs, narrative, and the 1st decision point.";
     } else if (decisionIndex !== null) {
+        const lastAssistantResponseEntry = dialogueHistory.findLast((entry) => entry.role === 'assistant');
+        let chosenOptionText = '';
+        if (lastAssistantResponseEntry) {
+            try {
+                const previousStepData = JSON.parse(lastAssistantResponseEntry.content);
+                const chosenOption = (typeof decisionIndex === 'number' && decisionIndex >= 0 && decisionIndex < (previousStepData.decisionPoint?.options?.length || 0))
+                    ? previousStepData.decisionPoint.options[decisionIndex]
+                    : null;
+                if (chosenOption) {
+                    chosenOptionText = `: "${chosenOption.text}"`;
+                }
+            } catch (e) { console.error("Error parsing previous AI response for chosen option text:", e); }
+        }
+
         if (currentDecisionCount < 2) { // User made 1st (count=0) or 2nd (count=1) choice. AI generates DP2 or DP3.
-            systemPrompt += `\nTask: User chose option index ${decisionIndex} for their ${currentDecisionCount + 1}st/nd decision. Generate narrative consequences and the NEXT decision point. \`scenarioKCsOverall\` must be [].`;
+            systemPrompt += `\nTask: User chose option index ${decisionIndex}${chosenOptionText} for their ${currentDecisionCount + 1}st/nd decision. Generate narrative consequences and the NEXT decision point. \`scenarioKCsOverall\` must be [].`;
         } else if (currentDecisionCount === 2) { // User made 3rd choice (count=2). AI concludes.
-            systemPrompt += `\nTask: User chose option index ${decisionIndex} for their THIRD decision. Generate concluding narrative. \`decisionPoint\` = null, \`scenarioComplete\` = true. \`scenarioKCsOverall\` must be [].`;
+            systemPrompt += `\nTask: User chose option index ${decisionIndex}${chosenOptionText} for their THIRD decision. Generate concluding narrative. \`decisionPoint\` = null, \`scenarioComplete\` = true. \`scenarioKCsOverall\` must be [].`;
         }
     } else if (currentDecisionCount === 3 && decisionIndex === null) {
         // This case might occur if page reloads after 3rd decision but before summary. AI should provide conclusion.
@@ -461,7 +475,20 @@ Scenario Characters:
     messagesForOpenAI.push(...relevantHistory);
 
     if (decisionIndex !== null) {
-        messagesForOpenAI.push({ role: "user", content: `I chose decision option index: ${decisionIndex}. Based on the Current State (${currentDecisionCount} decisions made before this choice), what happens next?` });
+        const lastAssistantResponseEntry = dialogueHistory.findLast((entry) => entry.role === 'assistant');
+        let chosenOptionText = '';
+        if (lastAssistantResponseEntry) {
+            try {
+                const previousStepData = JSON.parse(lastAssistantResponseEntry.content);
+                const chosenOption = (typeof decisionIndex === 'number' && decisionIndex >= 0 && decisionIndex < (previousStepData.decisionPoint?.options?.length || 0))
+                    ? previousStepData.decisionPoint.options[decisionIndex]
+                    : null;
+                if (chosenOption) {
+                    chosenOptionText = `: "${chosenOption.text}"`;
+                }
+            } catch (e) { console.error("Error parsing previous AI response for chosen option text:", e); }
+        }
+        messagesForOpenAI.push({ role: "user", content: `I chose decision option index: ${decisionIndex}${chosenOptionText}. Based on the Current State (${currentDecisionCount} decisions made before this choice), what happens next?` });
     } else if (currentDecisionCount === 0) {
         messagesForOpenAI.push({ role: "user", content: "Start this new scenario attempt." });
     } else if (currentDecisionCount >= 3) { // Should generate conclusion
@@ -551,7 +578,20 @@ Scenario Characters:
     const newDialogueHistoryEntry: DialogueEntry = { role: "assistant", content };
     const updatedDialogueHistory = [...dialogueHistory];
     if (decisionIndex !== null) {
-        updatedDialogueHistory.push({ role: "user", content: `User chose decision index: ${decisionIndex}` });
+        const lastAssistantResponseEntry = dialogueHistory.findLast((entry) => entry.role === 'assistant');
+        let chosenOptionText = '';
+        if (lastAssistantResponseEntry) {
+            try {
+                const previousStepData = JSON.parse(lastAssistantResponseEntry.content);
+                const chosenOption = (typeof decisionIndex === 'number' && decisionIndex >= 0 && decisionIndex < (previousStepData.decisionPoint?.options?.length || 0))
+                    ? previousStepData.decisionPoint.options[decisionIndex]
+                    : null;
+                if (chosenOption) {
+                    chosenOptionText = `: "${chosenOption.text}"`;
+                }
+            } catch (e) { console.error("Error parsing previous AI response for chosen option text:", e); }
+        }
+        updatedDialogueHistory.push({ role: "user", content: `User chose decision index: ${decisionIndex}${chosenOptionText}` });
     }
     updatedDialogueHistory.push(newDialogueHistoryEntry);
 
