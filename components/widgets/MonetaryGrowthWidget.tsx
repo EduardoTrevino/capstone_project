@@ -45,7 +45,7 @@ export default function MonetaryGrowthWidget({ data, total }: Props) {
               </linearGradient>
             </defs>
             <CartesianGrid stroke="#B22335" strokeDasharray="3 3" strokeOpacity={0.4} />
-            <XAxis dataKey="name" stroke="#B22335" tick={{ fill: "#B22335", fontSize: 10 }} axisLine={{ stroke: "#B22335" }} tickLine={{ stroke: "#B22335" }} tickFormatter={(value) => `S${value}`} />
+            <XAxis dataKey="name" stroke="#B22335" tick={{ fill: "#B22335", fontSize: 10 }} axisLine={{ stroke: "#B22335" }} tickLine={{ stroke: "#B22335" }} tickFormatter={(value) => `D${value}`} />
             <YAxis domain={[0, yMax]} stroke="#B22335" tick={{ fill: "#B22335", fontSize: 10 }} axisLine={{ stroke: "#B22335" }} tickLine={{ stroke: "#B22335" }} tickFormatter={v => (v === 0 ? "" : v)} />
             <Tooltip content={<CustomTip />} cursor={{ stroke: "transparent" }} />
             <Line type="monotone" dataKey="value" stroke="#FF9A00" strokeWidth={2} dot={{ r: 3, strokeWidth: 0, fill: "#FF9A00" }} activeDot={{ r: 4 }} fill="url(#growthFill)" fillOpacity={1} />
