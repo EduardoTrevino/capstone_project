@@ -212,7 +212,16 @@ export default function NarrativeGamePage() {
            stepImage = getCharacterImagePath(currentStepData.narrativeSteps[0].character);
         }
         if (stepImage !== mainCharacterImage) setMainCharacterImage(stepImage);
-        if (currentStepData.decisionPoint) setSelectedDecisionOption(null);
+        if (currentStepData.decisionPoint) {
+            setSelectedDecisionOption(null);
+            // Log KC metric scores for all options
+            console.log('KC Metric Scores for all options:');
+            currentStepData.decisionPoint.options.forEach((option, index) => {
+                if ('kc_impacts' in option) {
+                    console.log(`Option ${index + 1}:`, option.kc_impacts);
+                }
+            });
+        }
 
         if (currentStepData.narrativeSteps?.length > 0) {
           setMessageQueue([...currentStepData.narrativeSteps]);
@@ -376,6 +385,12 @@ export default function NarrativeGamePage() {
   function handleSelectDecisionOption(index: number) {
     if (isLoadingApi || !showInteractionArea) return;
     setSelectedDecisionOption(index);
+
+    // Log KC metric scores for the selected option
+    const option = currentStepData?.decisionPoint?.options[index];
+    if (option && 'kc_impacts' in option) {
+      console.log('KC Metric Scores for selected option:', option.kc_impacts);
+    }
   }
 
   async function submitDecision() {
