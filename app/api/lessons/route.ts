@@ -63,7 +63,7 @@ const gameStepSchemaForAI = {
                   type: "object",
                   properties: {
                     kc_identifier: { type: "string", description: "The KC identifier (e.g., 'KC6', 'KC5') affected. MUST be one of the provided KCs." },
-                    score: { type: "integer", description: "A small positive or negative integer score (e.g., between -3 and +3) representing the impact on this KC." }
+                    score: { type: "number", description: "A floating point number score Between -1 and 1 representing the impact on this KC. Note 0 means no impact" }
                   },
                   required: ["kc_identifier", "score"],
                   additionalProperties: false
@@ -296,7 +296,32 @@ export async function POST(req: NextRequest) {
     console.log(`[/api/lessons] Goal: ${goalName}. Scenario Attempt Number: ${scenarioAttemptNumber}. Effective decisions made for this new/ongoing scenario: ${currentDecisionCount}`);
 
     const definitions = await getDefinitionsBundle();
-    const kcListForPrompt = definitions.kcs.map(kc => `- ${kc.kc_identifier}: ${kc.name} (${kc.description || 'General business skill'})`).join("\n");
+    // const kcListForPrompt = definitions.kcs.map(kc => `- ${kc.kc_identifier}: ${kc.name} (${kc.description || 'General business skill'})`).join("\n");
+    const { data: goalKcLinks, error: goalKcError } = await supabase
+        .from('goal_kcs')
+        .select('kc_id')
+        .eq('goal_id', focusedGoalId);
+    
+    if (goalKcError){
+        console.error("Error fetching goal-KC links:", goalKcError);
+        return NextResponse.json({error: "Failed to fetch KCs for the current goal." }, {status: 500});
+    }
+
+    if (!goalKcLinks || goalKcLinks.length === 0) {
+        console.warn(`No KCs found in the goals_kcs table for goal_id: ${focusedGoalId}. The AI prompt will have an empty KC list.`)
+    }
+    
+    const relevantKcIds = new Set(goalKcLinks.map(link => link.kc_id));
+
+    const filteredKcsForGoal = definitions.kcs.filter(kc => relevantKcIds.has(kc.id));
+
+    const kcListForPrompt = filteredKcsForGoal.length > 0
+        ? filteredKcsForGoal.map(kc => ` - ${kc.kc_identifier}: ${kc.name} (${kc.description || 'General business skill'})`).join("\n")
+        : "No specific Knowledge Components are targeted for this goal.";
+
+    console.log(" --- Loading KCs for goal id:", focusedGoalId, "into prompt ---");
+    console.log(kcListForPrompt);
+    console.log("----------------------------------------------------------------");
 
     let totalKcChangesForThisTurn: Array<{ kc_id: number, kc_identifier: string, change: number }> = [];
     if (decisionIndex !== null && dialogueHistory.length > 0) {
@@ -340,9 +365,9 @@ export async function POST(req: NextRequest) {
 
                 let rawMetricChange = 0; let unit = "";
                 switch (metricDef.name) {
-                    case 'Revenue': rawMetricChange = kcChange.change * 450; unit = "₹"; break; // Increased impact
-                    case 'Customer Satisfaction': rawMetricChange = kcChange.change * 2; unit = "%"; break;
-                    case 'Reputation': rawMetricChange = kcChange.change * 0.15; unit = " stars"; break;
+                    case 'Revenue': rawMetricChange = kcChange.change * 700; unit = "₹"; break; // Increased impact
+                    case 'Customer Satisfaction': rawMetricChange = kcChange.change * 12.5; unit = "%"; break;
+                    case 'Reputation': rawMetricChange = kcChange.change * 0.3; unit = " stars"; break;
                     case 'Ethical Decision Making': rawMetricChange = kcChange.change * 2; unit = "%"; break; // Slightly higher impact
                     case 'Risk-Taking': rawMetricChange = kcChange.change * 2; unit = "%"; break;
                     default: rawMetricChange = kcChange.change * 2; unit = "%";
@@ -380,7 +405,7 @@ export async function POST(req: NextRequest) {
 
     // --- Build the dynamic system prompt ---
     // The system prompt needs to adapt based on whether it's a new scenario or continuation
-    let systemPrompt = `You are an expert scenario generator for an educational business simulation game.
+    let systemPrompt = `You are a scenario generator for an educational game that teaches entrepreneurial skills to high-school students from rural India. The gameplay uses real-life decisions in a drone leasing venture to teach foundational business concepts.
 Player: "${userName}".
 Current Learning Goal: "${goalName}". Goal Description: "${goalDescription}". Win Conditions: "${textualWinConditions}".
 This is Scenario Attempt number ${scenarioAttemptNumber} for this goal (out of 3 attempts, each with a unique narrative).
@@ -409,7 +434,7 @@ Detailed Instructions:
 2.  KCs:
     *   \`scenarioKCsOverall\`: IF \`currentDecisionCount\` is 0, select 1-3 KC identifiers from the list that this entire scenario attempt will focus on. Otherwise,  MUST be an empty array \`[]\`.
     *   \`decisionPointKCsFocused\`: For each \`decisionPoint\`, select 1-3 relevant KC identifiers.
-    *   \`kc_impacts\` (within each option): Assign 1-3 KCs. Scores should be small integers (e.g., -2, -1, 0, 1, 2, max -3 to +3). Positive scores are good for the KC, negative are detrimental, options can have a balance of both ++, --, -+, +- etc. .
+    *   \`kc_impacts\` (within each option): Assign 1-3 KCs. Scores should be floating point numbers that range between -1, and 1. 0 represents no change. Positive scores are good for the KC, negative are detrimental, options can have a balance of both positive and negative values to mimic real-world tradeoffs.
 3.  Decision Points & Options:
     *   If \`currentDecisionCount\` < 3, a \`decisionPoint\` object is required.
     *   If \`currentDecisionCount\` == 3, \`decisionPoint\` MUST be null, and \`scenarioComplete\` MUST be true.
@@ -434,8 +459,9 @@ Scenario Characters:
 - Rani: She is a successful Entrepreneur who is always willing to provide help and guidance. Her persona is exuberant, encouraging, and quick to offer both positive affirmation and constructive feedback.
 - Ali: He is a partner to the player. He is the entrepreneurial vendor who introduces advanced drone technology and leasing models. He also provides the hardware for missions, tasks, and challenges in the game.
 - Santosh: He is a customer and farmer by profession. He also voices the other customers' feedback and needs on their behalf. His persona is that of a wise elder and community figure with a strong sense of ethics and social responsibility. 
-- Manju: She is an official from a government-backed program or a funding agency that incentivizes agritech innovations—particularly drone leasing. Her role is to acts as a resource for subsidies, grants, or low-interest loans to support entrepreneurs who meet certain criteria (e.g., community impact, sustainable practices).
-- Rajesh: He is a friendly rival and occasional co-learner, representing the typical rural youth eager to learn new tech skills. His role is to encourage healthy competition, which can drive engagement.
+- Manju: She is an official from a government-backed program that incentivizes agritech innovations—particularly drone leasing. Her role is to acts as a resource for subsidies, grants, or low-interest loans to support entrepreneurs who meet certain criteria (e.g., community impact, sustainable practices).
+- Rajesh: He is a fierce rival, representing the typical real-world competitor. His role is to encourage healthy competition.
+- Narrator: After the user has made a decision. The Narrator will provide the definitions of difficult words that were in that decision point.
 
 
 `;
