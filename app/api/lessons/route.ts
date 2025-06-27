@@ -778,7 +778,86 @@ Scenario Characters:
     // The number of decisions effectively made in the scenario that just got a response
     const decisionsEffectivelyMadeThisScenario = currentDecisionCount + (parsedScenarioStep.decisionPoint && decisionIndex !== null ? 1 : (decisionIndex === null && parsedScenarioStep.decisionPoint ? 0 : (decisionIndex !== null && !parsedScenarioStep.decisionPoint ? 1 : 0) ) );
 
+    // This block runs only when a user has made a decision in this turn.
+    if (decisionIndex !== null) {
+        try {
+            // 1. Get data about the decision the user was presented with ("the cause")
+            const lastAssistantResponseEntry = dialogueHistory.findLast((entry) => entry.role === 'assistant');
+            let decision_point_question: string | null = null;
+            let options_presented: any[] | null = null;
+            let chosen_option_text: string | null = null;
+            let kc_impacts_of_choice: any[] | null = null;
 
+            if (lastAssistantResponseEntry) {
+                const previousStepData = JSON.parse(lastAssistantResponseEntry.content);
+                if (previousStepData.decisionPoint) {
+                    decision_point_question = previousStepData.decisionPoint.question;
+                    options_presented = previousStepData.decisionPoint.options;
+                    const chosenOption = (typeof decisionIndex === 'number' && decisionIndex >= 0 && decisionIndex < (options_presented?.length || 0))
+                        ? options_presented?.[decisionIndex]
+                        : null;
+                    if (chosenOption) {
+                        chosen_option_text = chosenOption.text;
+                        kc_impacts_of_choice = chosenOption.kc_impacts;
+                    }
+                }
+            }
+
+            // 2. Get data about the state of the game AFTER the decision ("the effect")
+            const decisionNumberForLog = currentDecisionCount + 1;
+
+            // Fetch final KC scores after this turn's updates
+            const { data: finalKCScoresData, error: kcsFetchError } = await supabase
+                .from('user_kc_scores')
+                .select('kcs(kc_identifier), current_score')
+                .eq('user_id', userId);
+
+            if (kcsFetchError) throw new Error(`Failed to fetch final KC scores: ${kcsFetchError.message}`);
+
+            const kc_scores_after_decision = finalKCScoresData?.reduce((acc, score) => {
+                const kcs_data = score.kcs as unknown as { kc_identifier: string } | null; 
+                if (kcs_data?.kc_identifier) {
+                    acc[kcs_data.kc_identifier] = score.current_score;
+                }
+                return acc;
+            }, {} as Record<string, number>) || {};
+
+            // Reuse metric scores already fetched for the win condition check
+            const metric_values_after_decision = Object.fromEntries(currentUserMetrics) || {};
+
+            // 3. Construct and insert the complete historical record
+            const analyticsRecord = {
+                user_id: userId,
+                goal_id: focusedGoalId,
+                scenario_attempt_number: scenarioAttemptNumber,
+                decision_number: decisionNumberForLog,
+                decision_point_question,
+                options_presented,
+                chosen_option_index: decisionIndex,
+                chosen_option_text,
+                kc_impacts_of_choice,
+                kc_scores_after_decision,
+                metric_values_after_decision,
+                generated_narrative_steps: parsedScenarioStep.narrativeSteps,
+                scenario_completed_on_this_turn: parsedScenarioStep.scenarioComplete,
+            };
+
+            const { error: logError } = await supabase
+                .from('historical_learning_analytics')
+                .insert(analyticsRecord);
+
+            if (logError) {
+                // This is a non-blocking error. We log it but don't fail the API call.
+                console.error("[/api/lessons] CRITICAL: Failed to log to historical_learning_analytics:", logError);
+            } else {
+                console.log(`[/api/lessons] Successfully logged decision ${decisionNumberForLog} of attempt ${scenarioAttemptNumber} to historical_learning_analytics.`);
+            }
+
+        } catch (logErr: any) {
+            console.error("[/api/lessons] Error during historical_learning_analytics logging:", logErr.message, logErr.stack);
+        }
+    }
+    
     return NextResponse.json({
         scenarioStep: parsedScenarioStep,
         scenarioAttemptNumber: scenarioAttemptNumber, // The attempt number that was just played/started
