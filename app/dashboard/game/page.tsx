@@ -525,7 +525,8 @@ export default function NarrativeGamePage() {
       <ScenarioSummaryScreen
         scenarioAttemptNumber={scenarioSummaryData.scenarioAttemptNumber}
         currentGoalProgress={scenarioSummaryData.currentGoalProgress}
-        metricChanges={scenarioSummaryData.metricChanges}
+        userId={userId}
+        goalId={currentFocusedGoalId}
         goalStatus={scenarioSummaryData.goalStatus}
         onContinue={handleContinue}
         onReturnToDashboard={handleEndScenario}
