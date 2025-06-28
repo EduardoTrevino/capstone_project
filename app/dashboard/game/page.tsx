@@ -9,6 +9,7 @@ import { ChatMessage } from "@/components/ChatMessage";
 import { supabase } from "@/lib/supabase"; // Import Supabase clien
 import { useSearchParams } from 'next/navigation'; // For reading query params
 import { Loader2 } from 'lucide-react'; // If not already imported
+import ScenarioSummaryScreen from "@/components/ScenarioSummaryScreen";
 
 export const maxDuration = 300;
 
@@ -505,81 +506,30 @@ export default function NarrativeGamePage() {
   }
 
   if (showSummaryScreen && scenarioSummaryData) {
-    const { metricChanges, goalStatus, currentGoalProgress, scenarioAttemptNumber } = scenarioSummaryData;
+    const { goalStatus, scenarioAttemptNumber } = scenarioSummaryData;
     const goalCompletedOverall = goalStatus === 'completed';
-    const maxAttemptsForGoalCycle = 3;
-    const attemptsUsed = scenarioAttemptNumber;
-    const canPlayNextScenario = !goalCompletedOverall && attemptsUsed < maxAttemptsForGoalCycle;
+    const canPlayNextScenario = !goalCompletedOverall && scenarioAttemptNumber < 3;
+
+    // Smart handler for the "Continue" button
+    const handleContinue = () => {
+      if (goalCompletedOverall) {
+        handleSelectNewGoal(); // If goal is done, continue to select a new one
+      } else if (canPlayNextScenario) {
+        handleNextScenario(); // If more attempts left, continue to the next scenario
+      } else {
+        handleEndScenario(); // If out of attempts, continue to the dashboard
+      }
+    };
 
     return (
-        <div
-            className="absolute inset-0 z-30 flex items-center justify-center p-4 backdrop-blur-sm bg-black/30"
-            style={{
-                backgroundImage: `url('${gameBackground!}')`,
-                backgroundSize: 'cover',
-                backgroundPosition: 'center',
-            }}
-        >
-            <div className="bg-[#FEECCF] text-black p-6 md:p-8 rounded-xl shadow-2xl max-w-lg w-full text-center animate-fade-in">
-                <h2 className="text-2xl font-bold mb-2 text-[#A03827]">
-                    {goalCompletedOverall ? `${currentGoalName || 'Goal'} Achieved!` : `Scenario ${attemptsUsed} Complete!`}
-                </h2>
-                <p className="text-sm text-gray-700 mb-4">
-                    Overall Goal Progress: <span className="font-semibold">{currentGoalProgress}%</span>
-                </p>
-
-                {metricChanges && metricChanges.length > 0 ? (
-                    <div className="my-4 text-left space-y-1 max-h-48 overflow-y-auto p-2 border border-gray-300 rounded-md bg-white/50">
-                        <p className="font-semibold mb-2 text-gray-800">Performance This Scenario:</p>
-                        {metricChanges.map((mc, index) => (
-                            <p key={index} className={`text-sm ${mc.change >= 0 ? 'text-green-700' : 'text-red-700'}`}>
-                                {mc.metricName}: {mc.change >= 0 ? '+' : ''}{mc.change % 1 !== 0 ? mc.change.toFixed(2) : mc.change}{mc.unit}
-                                <span className="text-xs text-gray-500 ml-2">(Now: {mc.finalValue % 1 !== 0 ? mc.finalValue.toFixed(2) : mc.finalValue}{mc.unit})</span>
-                            </p>
-                        ))}
-                    </div>
-                ) : (
-                    <p className="my-4 text-sm text-gray-600">No direct metric changes recorded this scenario, but your choices are shaping your journey!</p>
-                )}
-
-                {goalCompletedOverall && (
-                    <p className="my-4 font-semibold text-green-600">Congratulations! You've successfully completed the goal: "{currentGoalName || 'This Goal'}"!</p>
-                )}
-                {!goalCompletedOverall && attemptsUsed < maxAttemptsForGoalCycle && (
-                     <p className="my-4 text-sm text-gray-700">You have {maxAttemptsForGoalCycle - attemptsUsed} scenario(s) remaining for this goal.</p>
-                )}
-                 {!goalCompletedOverall && attemptsUsed >= maxAttemptsForGoalCycle && (
-                     <p className="my-4 text-sm text-red-600">You've used all scenarios for this goal attempt. You can retry the goal from the dashboard if you have lives.</p>
-                )}
-
-                <div className="mt-6 space-y-3">
-                    <button
-                        onClick={handleEndScenario}
-                        className="w-full px-6 py-2.5 bg-gray-500 text-white rounded-lg text-sm font-bold hover:bg-gray-600 focus:outline-none focus:ring-2 focus:ring-gray-400 shadow-lg transform hover:scale-105 transition-all duration-150 ease-in-out"
-                    >
-                        Return to Dashboard
-                    </button>
-
-                    {goalCompletedOverall ? (
-                        <button
-                            onClick={handleSelectNewGoal}
-                            className="w-full px-6 py-2.5 bg-blue-600 text-white rounded-lg text-sm font-bold hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 shadow-lg transform hover:scale-105 transition-all duration-150 ease-in-out"
-                        >
-                            Select a New Goal
-                        </button>
-                    ) : (
-                        canPlayNextScenario && (
-                            <button
-                                onClick={handleNextScenario}
-                                className="w-full px-6 py-2.5 bg-green-500 text-white rounded-lg text-sm font-bold hover:bg-green-600 focus:outline-none focus:ring-2 focus:ring-green-400 shadow-lg transform hover:scale-105 transition-all duration-150 ease-in-out"
-                            >
-                                Next Scenario
-                            </button>
-                        )
-                    )}
-                </div>
-            </div>
-        </div>
+      <ScenarioSummaryScreen
+        scenarioAttemptNumber={scenarioSummaryData.scenarioAttemptNumber}
+        currentGoalProgress={scenarioSummaryData.currentGoalProgress}
+        metricChanges={scenarioSummaryData.metricChanges}
+        goalStatus={scenarioSummaryData.goalStatus}
+        onContinue={handleContinue}
+        onReturnToDashboard={handleEndScenario}
+      />
     );
   }
 
