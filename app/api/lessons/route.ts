@@ -3,6 +3,64 @@ import { supabase } from "@/lib/supabase"; // Ensure this is your admin client f
 
 export const maxDuration = 300;
 
+/**
+ * A helper function to delay execution for a specified number of milliseconds.
+ * @param ms The number of milliseconds to wait.
+ * @returns A promise that resolves after the delay.
+ */
+const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
+
+/**
+ * Wraps the native fetch API with a retry mechanism featuring exponential backoff.
+ * This is useful for handling transient network errors or temporary server-side issues.
+ * @param url The URL to fetch.
+ * @param options The options for the fetch request.
+ * @param maxRetries The maximum number of times to retry the request.
+ * @returns A promise that resolves with the fetch Response object.
+ * @throws Throws the last error encountered after all retries have been exhausted.
+ */
+async function fetchWithRetry(
+  url: string,
+  options: RequestInit,
+  maxRetries: number = 3
+): Promise<Response> {
+  let lastError: Error | null = null;
+
+  for (let attempt = 0; attempt < maxRetries; attempt++) {
+    try {
+      if (attempt > 0) {
+        // Calculate delay with exponential backoff (e.g., 1s, 2s, 4s)
+        const delayDuration = 1000 * Math.pow(2, attempt - 1);
+        console.log(`[fetchWithRetry] Attempt ${attempt} failed. Retrying in ${delayDuration / 1000}s...`);
+        await delay(delayDuration);
+      }
+
+      const response = await fetch(url, options);
+
+      // If the response is OK (2xx status), we're done!
+      if (response.ok) {
+        return response;
+      }
+
+      // We should only retry on specific server errors (5xx), not client errors (4xx).
+      if (response.status >= 500 && response.status < 600) {
+        // This is a server error, so we'll throw an error to trigger a retry.
+        throw new Error(`Server error: ${response.status} ${response.statusText}`);
+      }
+
+      // If it's a client error (e.g., 400, 401, 429), don't retry. Return the failed response immediately.
+      console.error(`[fetchWithRetry] Non-retriable client error: ${response.status}. Aborting retries.`);
+      return response;
+
+    } catch (error: any) {
+      lastError = error;
+      console.error(`[fetchWithRetry] An error occurred on attempt ${attempt + 1}:`, error.message);
+    }
+  }
+
+  // If we've exhausted all retries, throw the last error we captured.
+  throw new Error(`[fetchWithRetry] API call failed after ${maxRetries} attempts. Last error: ${lastError?.message}`);
+}
 
 // Define the NEW structure for the JSON response we expect from OpenAI
 const gameStepSchemaForAI = {
@@ -533,7 +591,16 @@ Scenario Characters:
       temperature: 0.7,
     };
 
-    const response = await fetch("https://api.openai.com/v1/chat/completions", { method: "POST", headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiKey}` }, body: JSON.stringify(payload) });
+    console.log("[/api/lessons] Calling OpenAI API... (with up to 3 retry attempts)");
+    const response = await fetchWithRetry(
+        "https://api.openai.com/v1/chat/completions", 
+        { 
+            method: "POST", 
+            headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiKey}` }, 
+            body: JSON.stringify(payload) 
+        },
+        3 // Max number of retries
+    );
 
     if (!response.ok) {
         const errorText = await response.text();
