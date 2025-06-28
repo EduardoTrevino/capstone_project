@@ -7,7 +7,7 @@ import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase";
 import { Loader2 } from "lucide-react";
 
-// Define the props interface for the component
+// --- TYPE DEFINITIONS ---
 interface ScenarioSummaryScreenProps {
   userId: string;
   goalId: number | null;
@@ -18,7 +18,20 @@ interface ScenarioSummaryScreenProps {
   onReturnToDashboard: () => void;
 }
 
-// Map metric names to their icon paths for easy lookup
+interface KcImpact {
+  score: number;
+  kc_identifier: string;
+}
+
+interface DefinitionBundle {
+  kcIdentifierToId: Map<string, number>;
+  // NEW: This map correctly handles the one-to-many relationship
+  kcIdToMetricIds: Map<number, number[]>; 
+  metricIdToName: Map<number, string>;
+  metricUnits: Record<string, string>;
+}
+
+// --- CONSTANTS ---
 const metricIconMap: Record<string, string> = {
   "Revenue": "/assets/metric_icons/revenue_icon.svg",
   "Customer Satisfaction": "/assets/metric_icons/customer_satisfaction_icon.svg",
@@ -26,6 +39,43 @@ const metricIconMap: Record<string, string> = {
   "Ethical Decision Making": "/assets/metric_icons/edm_icon.svg",
   "Risk-Taking": "/assets/metric_icons/rt_icon.svg",
 };
+
+// --- HELPER FUNCTION to fetch definitions needed for calculation ---
+async function getCalculationDefinitions(): Promise<DefinitionBundle> {
+  const [kcsRes, effectsRes, metricsRes] = await Promise.all([
+    supabase.from('kcs').select('id, kc_identifier'),
+    supabase.from('kc_metric_effects').select('kc_id, metric_id'),
+    supabase.from('metrics').select('id, name')
+  ]);
+
+  if (kcsRes.error) throw new Error(`Failed to fetch KCs: ${kcsRes.error.message}`);
+  if (effectsRes.error) throw new Error(`Failed to fetch KC-Metric Effects: ${effectsRes.error.message}`);
+  if (metricsRes.error) throw new Error(`Failed to fetch Metrics: ${metricsRes.error.message}`);
+
+  const kcIdentifierToId = new Map(kcsRes.data.map(kc => [kc.kc_identifier, kc.id]));
+  const metricIdToName = new Map(metricsRes.data.map(m => [m.id, m.name]));
+
+  // --- THIS IS THE CRITICAL FIX ---
+  // Create a map where a KC ID can map to an array of metric IDs.
+  const kcIdToMetricIds = new Map<number, number[]>();
+  for (const effect of effectsRes.data) {
+    if (!kcIdToMetricIds.has(effect.kc_id)) {
+      kcIdToMetricIds.set(effect.kc_id, []);
+    }
+    kcIdToMetricIds.get(effect.kc_id)!.push(effect.metric_id);
+  }
+
+  const metricUnits: Record<string, string> = {
+    'Revenue': '₹',
+    'Customer Satisfaction': '%',
+    'Reputation': '%',
+    'Ethical Decision Making': '%',
+    'Risk-Taking': '%',
+  };
+
+  return { kcIdentifierToId, kcIdToMetricIds, metricIdToName, metricUnits };
+}
+
 
 export default function ScenarioSummaryScreen({
   userId,
@@ -37,7 +87,6 @@ export default function ScenarioSummaryScreen({
   onReturnToDashboard,
 }: ScenarioSummaryScreenProps) {
   const router = useRouter();
-  // The type of metricChanges is updated to reflect that `unit` is part of the main object
   const [metricChanges, setMetricChanges] = useState<Array<{ metricName: string; change: number; unit: string }>>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -52,55 +101,74 @@ export default function ScenarioSummaryScreen({
     const calculateScenarioChanges = async () => {
       setIsLoading(true);
       setError(null);
+      
       try {
-        const { data: historyData, error: historyError } = await supabase
-          .from('historical_learning_analytics')
-          .select('decision_number, metric_values_after_decision')
-          .eq('user_id', userId)
-          .eq('goal_id', goalId)
-          .eq('scenario_attempt_number', scenarioAttemptNumber)
-          .in('decision_number', [1, 3]);
+        const [definitions, historyRes] = await Promise.all([
+          getCalculationDefinitions(),
+          supabase
+            .from('historical_learning_analytics')
+            .select('kc_impacts_of_choice')
+            .eq('user_id', userId)
+            .eq('goal_id', goalId)
+            .eq('scenario_attempt_number', scenarioAttemptNumber)
+            .in('decision_number', [1, 2, 3])
+        ]);
+        
+        if (historyRes.error) throw historyRes.error;
+        
+        const { kcIdentifierToId, kcIdToMetricIds, metricIdToName, metricUnits } = definitions;
+        const allKcImpacts: KcImpact[] = historyRes.data.flatMap(
+          row => (row.kc_impacts_of_choice as KcImpact[] | null) || []
+        );
 
-        if (historyError) throw historyError;
+        // First, aggregate the total scores for each KC identifier
+        const totalKcScores = new Map<string, number>();
+        for (const impact of allKcImpacts) {
+            totalKcScores.set(impact.kc_identifier, (totalKcScores.get(impact.kc_identifier) || 0) + impact.score);
+        }
 
-        const startRecord = historyData.find(d => d.decision_number === 1);
-        const endRecord = historyData.find(d => d.decision_number === 3);
+        // Now, calculate the metric changes based on the aggregated KC scores
+        const cumulativeChanges = new Map<string, number>();
 
-        if (!startRecord?.metric_values_after_decision || !endRecord?.metric_values_after_decision) {
-          throw new Error("Missing start or end data for scenario summary calculation.");
+        for (const [kcIdentifier, totalScore] of totalKcScores.entries()) {
+          const kcId = kcIdentifierToId.get(kcIdentifier);
+          if (!kcId) continue;
+          
+          const affectedMetricIds = kcIdToMetricIds.get(kcId);
+          if (!affectedMetricIds) continue;
+          
+          // Loop through EACH metric this KC affects
+          for (const metricId of affectedMetricIds) {
+            const metricName = metricIdToName.get(metricId);
+            if (!metricName) continue;
+
+            let rawMetricChange = 0;
+            switch (metricName) {
+              case 'Revenue': rawMetricChange = totalScore * 700; break;
+              case 'Customer Satisfaction': rawMetricChange = totalScore * 12.5; break;
+              case 'Reputation': rawMetricChange = totalScore * 0.3; break;
+              case 'Ethical Decision Making': rawMetricChange = totalScore * 2; break;
+              case 'Risk-Taking': rawMetricChange = totalScore * 2; break;
+              default: rawMetricChange = totalScore * 2;
+            }
+
+            cumulativeChanges.set(metricName, (cumulativeChanges.get(metricName) || 0) + rawMetricChange);
+          }
         }
         
-        const startMetrics = startRecord.metric_values_after_decision as Record<string, number>;
-        const endMetrics = endRecord.metric_values_after_decision as Record<string, number>;
-
-        const metricUnits: Record<string, string> = {
-          'Revenue': '₹',
-          'Customer Satisfaction': '%',
-          'Reputation': '%',
-          'Ethical Decision Making': '%',
-          'Risk-Taking': '%',
-        };
-
-        const cumulativeSummary: Array<{ metricName: string; change: number; unit: string }> = [];
-        
-        for (const metricName in endMetrics) {
-          const endValue = endMetrics[metricName] || 0;
-          const startValue = startMetrics[metricName] || 0; 
-          const change = parseFloat((endValue - startValue).toFixed(2));
-
-          // --- FIX: REMOVED THE if (change !== 0) CONDITION ---
-          // Now we push every metric, regardless of whether it changed.
-          cumulativeSummary.push({
+        const summary: Array<{ metricName: string; change: number; unit: string }> = [];
+        for (const [metricName, totalChange] of cumulativeChanges.entries()) {
+          summary.push({
             metricName: metricName,
-            change: change,
+            change: parseFloat(totalChange.toFixed(2)),
             unit: metricUnits[metricName] || '%',
           });
         }
         
-        setMetricChanges(cumulativeSummary);
+        setMetricChanges(summary);
 
       } catch (e: any) {
-        console.error("Error calculating summary:", e.message);
+        console.error("Error calculating summary:", e);
         setError("Could not load scenario summary.");
       } finally {
         setIsLoading(false);
@@ -142,15 +210,7 @@ export default function ScenarioSummaryScreen({
               const displayName = metric.metricName === 'Revenue' ? 'Monetary Growth' : metric.metricName;
               const iconPath = metricIconMap[metric.metricName] || "/assets/metric_icons/revenue_icon.svg";
               
-              // --- FIX: ADDED COLOR LOGIC FOR ZERO CHANGE ---
-              const changeColorClass = 
-                metric.change > 0 
-                ? 'text-green-600' 
-                : metric.change < 0 
-                ? 'text-red-600' 
-                : 'text-gray-500'; // Neutral grey for zero
-
-              // Prefix for positive numbers, but not for zero
+              const changeColorClass = metric.change > 0 ? 'text-green-600' : metric.change < 0 ? 'text-red-600' : 'text-gray-500';
               const changePrefix = metric.change > 0 ? '+' : '';
               
               return (
@@ -168,7 +228,6 @@ export default function ScenarioSummaryScreen({
           )}
         </div>
         
-        {/* ... (Rest of the JSX remains the same) ... */}
         <div className="min-h-[60px] flex items-center justify-center text-center px-2 mb-4">
           {isGoalCompleted && (<p className="font-semibold text-green-700">You successfully completed the goal, check out the log to see how you did.</p>)}
           {isGoalFailed && (<p className="font-semibold text-red-700 text-sm">Oh no! It looks like we made some bad decisions along the way. No worries, review your log and try again, but it will cost you a life!</p>)}
