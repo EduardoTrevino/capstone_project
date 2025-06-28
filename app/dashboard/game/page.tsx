@@ -113,11 +113,17 @@ export default function NarrativeGamePage() {
   // --- Refs ---
   const messagesEndRef = useRef<null | HTMLDivElement>(null);
   const messageIdCounter = useRef(0);
+  const isInitialized = useRef(false); // <-- ADD THIS LINE
 
   // --- Effects ---
 
   // Initial load
   useEffect(() => {
+      if (isInitialized.current) {
+        return; // If already initialized, do nothing.
+    }
+    isInitialized.current = true; // Set the flag immediately on the first run.
+
     const storedUserId = localStorage.getItem("userId");
     if (!storedUserId) {
       console.error("User ID not found, redirecting.");
