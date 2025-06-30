@@ -7,9 +7,8 @@ import { supabase } from "@/lib/supabase"
 
 export default function Home() {
   const [username, setUsername] = useState("")
-  // This controls the start button's image swap
   const [isButtonClicked, setIsButtonClicked] = useState(false)
-  const [isMuted, setIsMuted] = useState(true)  
+  const [isMuted, setIsMuted] = useState(true)
   const [audioLoaded, setAudioLoaded] = useState(false)
 
   const router = useRouter()
@@ -17,6 +16,7 @@ export default function Home() {
   const bgmAudioRef = useRef<HTMLAudioElement | null>(null)
   const clickAudioRef = useRef<HTMLAudioElement | null>(null)
 
+  // ... (all your useEffect and handler functions remain the same)
   // ------------------------------------------------------
   // 1) On mount, create audio objects
   // ------------------------------------------------------
@@ -108,16 +108,15 @@ export default function Home() {
         return
       }
       localStorage.setItem("username", newUser.name)
-      localStorage.setItem("userId", newUser.id) // Add this line
+      localStorage.setItem("userId", newUser.id)
       router.push("/intro/1")
       return
     }
 
     localStorage.setItem("username", existingUser.name)
-    localStorage.setItem("userId", existingUser.id) // useful for fetching user-specific data like goals
+    localStorage.setItem("userId", existingUser.id)
 
     if (existingUser.intro_done) {
-      // Redirect existing users who finished intro to the NEW home page (goals)
       router.push("/dashboard/")
     } else {
       router.push("/intro/1")
@@ -133,9 +132,45 @@ export default function Home() {
         backgroundPosition: "center",
       }}
     >
-      {/* big game name */}
+      {/* NEW: Corner logos container */}
+      <>
+        {/* Top-left logo */}
+        <div className="absolute top-5 left-5 z-10">
+          <Image
+            src="/assets/login/roundx.png"
+            alt="Round X Logo"
+            width={80}
+            height={80}
+          />
+        </div>
+        {/* Top-right logo */}
+        <div className="absolute top-5 right-5 z-10">
+          <Image
+            src="/assets/login/turnthebus.png"
+            alt="Turn The Bus Logo"
+            width={120}
+            height={80}
+          />
+        </div>
+        {/* Bottom-left logo */}
+        <div className="absolute bottom-5 left-5 z-10">
+          <Image
+            src="/assets/login/cmu.png"
+            alt="CMU Logo"
+            width={140}
+            height={55}
+          />
+        </div>
+      </>
+
+      {/* NEW: big game name, now using the SVG file */}
       <div className="mb-8">
-        <Image src="/game_name.png" alt="Game Name" width={400} height={200} />
+        <Image
+          src="/assets/login/Udyam_Path.png" // <-- The path to your SVG
+          alt="Udyam Path Game Logo"
+          width={400}
+          height={200}
+        />
       </div>
 
       {/* Form for username */}
@@ -168,7 +203,7 @@ export default function Home() {
                      hover:scale-105 transition-transform"
         />
 
-        {/* Start button - swap images on mousedown/mouseup */}
+        {/* Start button */}
         <button
           type="submit"
           onMouseDown={() => {
