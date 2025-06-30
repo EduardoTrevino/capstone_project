@@ -10,6 +10,8 @@ interface Props {
 export default function CustomerSatisfactionWidget({ score }: Props) {
   const pct = Math.max(0, Math.min(100, score));
 
+  const displayPct = Math.round(pct * 100) / 100;
+
   const faces = [
     { pct: 0.25, icon: "Business_CS_Angry.svg" },
     { pct: 0.5, icon: "Business_CS_Neutral.svg" },
@@ -84,7 +86,7 @@ export default function CustomerSatisfactionWidget({ score }: Props) {
           transform: `translateX(${pct < 10 ? '0%' : pct > 90 ? '-100%' : '-50%'})`
         }}
       >
-        {pct}%
+        {displayPct}%
       </div>
     </section>
   );
