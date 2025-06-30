@@ -492,7 +492,7 @@ Detailed Instructions:
 2.  KCs:
     *   \`scenarioKCsOverall\`: IF \`currentDecisionCount\` is 0, select 1-3 KC identifiers from the list that this entire scenario attempt will focus on. Otherwise,  MUST be an empty array \`[]\`.
     *   \`decisionPointKCsFocused\`: For each \`decisionPoint\`, select 1-3 relevant KC identifiers.
-    *   \`kc_impacts\` (within each option): Assign 1-3 KCs. Scores should be floating point numbers that range between -1, and 1. 0 represents no change. Positive scores are good for the KC, negative are detrimental, options can have a balance of both positive and negative values to mimic real-world tradeoffs.
+    *   \`kc_impacts\` (within each option): Assign 1-3 KCs. Scores should be floating point numbers that range between -1, and 1. 0 represents no change. Positive scores are good for the KC, negative are detrimental, options are REQUIRED to have a diversity of positive and negative values specifcally follow the structure where one option has two positive values (+,+) but no one value exceeds 0.5. two (+,-) values where there is a trade off, and one (-,-).
 3.  Decision Points & Options:
     *   If \`currentDecisionCount\` < 3, a \`decisionPoint\` object is required.
     *   If \`currentDecisionCount\` == 3, \`decisionPoint\` MUST be null, and \`scenarioComplete\` MUST be true.
@@ -519,7 +519,7 @@ Scenario Characters:
 - Santosh: He is a customer and farmer by profession. He also voices the other customers' feedback and needs on their behalf. His persona is that of a wise elder and community figure with a strong sense of ethics and social responsibility. 
 - Manju: She is an official from a government-backed program that incentivizes agritech innovations—particularly drone leasing. Her role is to acts as a resource for subsidies, grants, or low-interest loans to support entrepreneurs who meet certain criteria (e.g., community impact, sustainable practices).
 - Rajesh: He is a fierce rival, representing the typical real-world competitor. His role is to encourage healthy competition.
-- Narrator: After the user has made a decision. The Narrator will provide the definitions of difficult words that were in that decision point.
+- Narrator: AFTER the user has made a decision. The Narrator will provide the definitions of difficult words that were in that decision point.
 
 
 `;
