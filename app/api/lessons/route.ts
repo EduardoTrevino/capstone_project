@@ -62,6 +62,16 @@ async function fetchWithRetry(
   throw new Error(`[fetchWithRetry] API call failed after ${maxRetries} attempts. Last error: ${lastError?.message}`);
 }
 
+function shuffleArray<T>(array: T[]): T[] {
+    for (let i = array.length - 1; i > 0; i--) {
+      // Find a random index from 0 to i
+      const j = Math.floor(Math.random() * (i + 1));
+      // Swap elements array[i] and array[j]
+      [array[i], array[j]] = [array[j], array[i]];
+    }
+    return array;
+  }
+
 // Define the NEW structure for the JSON response we expect from OpenAI
 const gameStepSchemaForAI = {
   type: "object",
@@ -492,7 +502,7 @@ Detailed Instructions:
 2.  KCs:
     *   \`scenarioKCsOverall\`: IF \`currentDecisionCount\` is 0, select 1-3 KC identifiers from the list that this entire scenario attempt will focus on. Otherwise,  MUST be an empty array \`[]\`.
     *   \`decisionPointKCsFocused\`: For each \`decisionPoint\`, select 1-3 relevant KC identifiers.
-    *   \`kc_impacts\` (within each option): Assign 1-3 KCs. Scores should be floating point numbers that range between -1, and 1. 0 represents no change. Positive scores are good for the KC, negative are detrimental, options are REQUIRED to have a diversity of positive and negative values specifcally follow the structure where one option has two positive values (+,+) (but no one value exceeds 0.5). then two (+,-) values where there is a trade off, and one (-,-) a tricky, tempting answer but it's detrimental. These should be in random orders (ie +,+ option can be in first last 2, or 3) so the user does not recognize a pattern.
+    *   \`kc_impacts\` (within each option): Assign 1-3 KCs. Scores must be floating point numbers that range between -1.0 and 1.0. A score of 0 represents no change. Positive scores are good for the KC, while negative scores are detrimental. The options are REQUIRED to have a diversity of positive and negative values. Specifically, two options will represent a "trade-off" with one KC score with a positive value and one negative value (+,-) in the complete -1 to 1 range should be voltile, one option will have two KC score negative values (-,-) in the 0 to -0.6 range, and finally one will have two positive values (+,+) it the 0 to 0.6 range. 
 3.  Decision Points & Options:
     *   If \`currentDecisionCount\` < 3, a \`decisionPoint\` object is required.
     *   If \`currentDecisionCount\` == 3, \`decisionPoint\` MUST be null, and \`scenarioComplete\` MUST be true.
@@ -622,6 +632,11 @@ Scenario Characters:
     } catch (err) {
       console.error("[/api/lessons] Failed to parse JSON from AI:", content, err);
       return NextResponse.json({ error: "Could not parse valid JSON from AI.", raw_content: content }, { status: 500 });
+    }
+
+    if (parsedScenarioStep?.decisionPoint?.options) {
+        shuffleArray(parsedScenarioStep.decisionPoint.options);
+        console.log("[/api/lessons] Successfully randomized the order of decision point options.");
     }
     
     console.log("[/api/lessons] Parsed Scenario Step from AI =>", JSON.stringify(parsedScenarioStep, null, 2));
