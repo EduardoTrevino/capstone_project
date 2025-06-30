@@ -18,7 +18,11 @@ interface NarrativeDialogue {
   pfp: string;
   text: string;
 }
-interface DecisionPointOption { text: string; }
+interface DecisionPointOption { 
+  text: string; 
+  optionId: number; // Add stable ID
+  kc_impacts?: any[]; // Add kc_impacts if you want to access it on the frontend for logging
+}
 interface DecisionPoint { question: string; options: DecisionPointOption[]; }
 interface ScenarioStep {
   narrativeSteps: NarrativeDialogue[];
@@ -263,7 +267,7 @@ export default function NarrativeGamePage() {
 
   // --- Core Logic Functions ---
 
-  const loadScenarioStep = useCallback(async (decisionIndexParam: number | undefined | null, uid: string | null) => {
+  const loadScenarioStep = useCallback(async (chosenOptionIdParam: number | undefined | null, uid: string | null) => {
     if (!uid) {
       setError("User ID is missing.");
       setIsInitialLoading(false);
@@ -279,7 +283,7 @@ export default function NarrativeGamePage() {
       const res = await fetch("/api/lessons", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ userId: uid, decisionIndex: decisionIndexParam })
+        body: JSON.stringify({ userId: uid, chosenOptionId: chosenOptionIdParam })
       });
       const responseText = await res.text();
       if (!res.ok) {
@@ -389,12 +393,12 @@ export default function NarrativeGamePage() {
        }
    }, [isLoadingApi, messageQueue, showInteractionArea, handleNextStep, currentStepData]);
 
-  function handleSelectDecisionOption(index: number) {
+  function handleSelectDecisionOption(optionId: number) {
     if (isLoadingApi || !showInteractionArea) return;
-    setSelectedDecisionOption(index);
+    setSelectedDecisionOption(optionId);
 
-    // Log KC metric scores for the selected option
-    const option = currentStepData?.decisionPoint?.options[index];
+    // Find the option by its stable ID
+    const option = currentStepData?.decisionPoint?.options.find(opt => opt.optionId === optionId);
     if (option && 'kc_impacts' in option) {
       console.log('KC Metric Scores for selected option:', option.kc_impacts);
     }
@@ -402,15 +406,21 @@ export default function NarrativeGamePage() {
 
   async function submitDecision() {
     if (selectedDecisionOption === null || !userId || isLoadingApi) return;
-    const decisionIndexToSubmit = selectedDecisionOption;
-    const choiceText = currentStepData?.decisionPoint?.options[decisionIndexToSubmit]?.text || '';
+    
+    const optionIdToSubmit = selectedDecisionOption;
+    // Find the full option object to get its text for the local chat display
+    const choiceObject = currentStepData?.decisionPoint?.options.find(opt => opt.optionId === optionIdToSubmit);
+    const choiceText = choiceObject?.text || 'my choice';
 
-    // Add user's choice message using the OLD style
+    // Add user's choice message
     setStaggeredMessages(prev => [...prev, {
       id: messageIdCounter.current++, character: "User", pfp: null, text: `I choose: "${choiceText}"`, isDecision: true
     }]);
+    
     setSelectedDecisionOption(null);
-    await loadScenarioStep(decisionIndexToSubmit, userId);
+    
+    // Pass chosenOptionId to the backend instead of decisionIndex
+    await loadScenarioStep(optionIdToSubmit, userId);
   }
 
   // --- New Handlers for Summary Screen Buttons ---
@@ -619,10 +629,10 @@ export default function NarrativeGamePage() {
                       <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                         {currentStepData.decisionPoint.options.map((opt, idx) => (
                           <button
-                            key={idx}
-                            onClick={() => handleSelectDecisionOption(idx)}
+                            key={opt.optionId}
+                            onClick={() => handleSelectDecisionOption(opt.optionId)}
                             className={`p-2.5 rounded-lg border-2 text-sm text-left transition-all duration-150 ease-in-out w-full focus:outline-none ${
-                              selectedDecisionOption === idx
+                              selectedDecisionOption === opt.optionId
                                 ? "border-yellow-400 bg-yellow-500/30 shadow-lg scale-[1.03] text-yellow-100 ring-2 ring-yellow-300/70"
                                 : "border-gray-400 bg-[#BBD9A1] hover:bg-[#BBD9A1]/90 text-[#214104] hover:border-gray-500 hover:scale-[1.02]"
                             }`}
