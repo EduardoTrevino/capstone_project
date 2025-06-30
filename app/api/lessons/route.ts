@@ -423,11 +423,11 @@ export async function POST(req: NextRequest) {
 
                 let rawMetricChange = 0; let unit = "";
                 switch (metricDef.name) {
-                    case 'Revenue': rawMetricChange = kcChange.change * 700; unit = "₹"; break; // Increased impact
-                    case 'Customer Satisfaction': rawMetricChange = kcChange.change * 12.5; unit = "%"; break;
-                    case 'Reputation': rawMetricChange = kcChange.change * 0.3; unit = " stars"; break;
-                    case 'Ethical Decision Making': rawMetricChange = kcChange.change * 2; unit = "%"; break; // Slightly higher impact
-                    case 'Risk-Taking': rawMetricChange = kcChange.change * 2; unit = "%"; break;
+                    case 'Revenue': rawMetricChange = kcChange.change * 5750; unit = "₹"; break; // Increased impact
+                    case 'Customer Satisfaction': rawMetricChange = kcChange.change * 6.5; unit = "%"; break;
+                    case 'Reputation': rawMetricChange = kcChange.change * 0.28; unit = " stars"; break;
+                    case 'Ethical Decision Making': rawMetricChange = kcChange.change * 9.5; unit = "%"; break; // Slightly higher impact
+                    case 'Risk-Taking': rawMetricChange = kcChange.change * 9.5; unit = "%"; break;
                     default: rawMetricChange = kcChange.change * 2; unit = "%";
                 }
 
@@ -790,27 +790,27 @@ Scenario Characters:
       finalDialogueHistoryForDB = [newDialogueHistoryEntry]; // Start fresh with only the AI's first message of new scenario
       console.log(`[/api/lessons] initial_metric_baselines (which is now our goal cycle baseline) will NOT be updated for this new scenario attempt.`);
       // Fetch current Revenue to record as the start of this new scenario attempt
-        const revenueMetricDefForNewAttempt = definitions.metrics.find(m => m.name === 'Revenue');
-        if (revenueMetricDefForNewAttempt) {
-            const { data: currentRevenueScore } = await supabase
-                .from('user_metric_scores')
-                .select('current_value')
-                .eq('user_id', userId)
-                .eq('metric_id', revenueMetricDefForNewAttempt.id)
-                .single();
+        // const revenueMetricDefForNewAttempt = definitions.metrics.find(m => m.name === 'Revenue');
+        // if (revenueMetricDefForNewAttempt) {
+        //     const { data: currentRevenueScore } = await supabase
+        //         .from('user_metric_scores')
+        //         .select('current_value')
+        //         .eq('user_id', userId)
+        //         .eq('metric_id', revenueMetricDefForNewAttempt.id)
+        //         .single();
             
-            if (currentRevenueScore) {
-                await supabase.from('user_metric_history').insert({
-                    user_id: userId,
-                    goal_id: focusedGoalId,
-                    metric_id: revenueMetricDefForNewAttempt.id,
-                    scenario_attempt_number: scenarioAttemptNumber, // The new attempt number
-                    decision_number: 0,                            // State before decisions in this new attempt
-                    value: parseFloat(currentRevenueScore.current_value as any),
-                    recorded_at: new Date().toISOString()
-                });
-            }
-        }
+        //     if (currentRevenueScore) {
+        //         await supabase.from('user_metric_history').insert({
+        //             user_id: userId,
+        //             goal_id: focusedGoalId,
+        //             metric_id: revenueMetricDefForNewAttempt.id,
+        //             scenario_attempt_number: scenarioAttemptNumber, // The new attempt number
+        //             decision_number: 0,                            // State before decisions in this new attempt
+        //             value: parseFloat(currentRevenueScore.current_value as any),
+        //             recorded_at: new Date().toISOString()
+        //         });
+        //     }
+        // }
     }
       
       // Also, re-snapshot baselines if there are "increase" type goals.
