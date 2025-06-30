@@ -247,10 +247,10 @@ export async function POST(req: NextRequest) {
     const apiKey = process.env.OPENAI_API_KEY;
     if (!apiKey) return NextResponse.json({ error: "Missing OPENAI_API_KEY" }, { status: 500 });
 
-    const { userId, decisionIndex } = (await req.json()) as { userId?: string; decisionIndex?: number | null; };
+    const { userId, chosenOptionId } = (await req.json()) as { userId?: string; chosenOptionId?: number | null; };
     if (!userId) return NextResponse.json({ error: "Missing userId" }, { status: 400 });
 
-    console.log(`[/api/lessons] User: ${userId}, DecisionIndex: ${decisionIndex}`);
+    console.log(`[/api/lessons] User: ${userId}, ChosenOptionId: ${chosenOptionId}`);
 
     const { data: userRow, error: userError } = await supabase.from("users").select("name, focused_goal_id").eq("id", userId).single();
     if (userError || !userRow || !userRow.focused_goal_id) {
@@ -338,9 +338,9 @@ export async function POST(req: NextRequest) {
     // If dialogueHistory is for a new attempt (e.g., after completing one), this count should be 0.
     // We might need to clear dialogueHistory or segment it per attempt for this count to be accurate for the *current* scenario.
     // For now, let's assume dialogueHistory is for the current ongoing scenario.
-    // If a new scenario is starting (decisionIndex is null AND this is effectively attempt N, dp 0), we should ensure state is clean.
+    // If a new scenario is starting (chosenOptionId is null AND this is effectively attempt N, dp 0), we should ensure state is clean.
     let currentDecisionCount = previousGameState.decisionCount;
-    if(decisionIndex === null && completedAttemptsForCycle === (scenarioAttemptNumber -1) && previousGameState.decisionCount === 3) {
+    if(chosenOptionId === null && completedAttemptsForCycle === (scenarioAttemptNumber -1) && previousGameState.decisionCount === 3) {
         // This implies the previous scenario was completed, and this is a fresh start for a new attempt number.
         // Reset currentDecisionCount if the dialogue history reflects a fully completed previous scenario.
         // This logic can be complex. A simpler way: when a scenario completes, the frontend starts "fresh" for the next one.
@@ -348,14 +348,14 @@ export async function POST(req: NextRequest) {
         // For simplicity, we'll rely on the frontend to reset `decisionCount` state for a new scenario.
         // The `previousGameState.decisionCount` reflects choices in the *entire dialogue history for this goal*.
         // This needs a more robust way to track decisions *per scenario attempt*.
-        // Quick Fix for now: if decisionIndex is null and it's not the very first scenario of goal:
+        // Quick Fix for now: if chosenOptionId is null and it's not the very first scenario of goal:
         // This means the previous scenario ended and we are starting a new one.
         // The `dialogueHistory` still contains old scenario. We need to clear it or segment it.
         // The `route.ts` should not manage this complex client-side state reset.
-        // Let's assume the client sends decisionIndex: null when it *truly* starts a new scenario.
+        // Let's assume the client sends chosenOptionId: null when it *truly* starts a new scenario.
         // Then, previousGameState.decisionCount *from the existing dialogueHistory* would be for the prior completed one.
-        // So, if decisionIndex is null, this is DP1, currentDecisionCount for AI prompt should be 0.
-        if(decisionIndex === null) {
+        // So, if chosenOptionId is null, this is DP1, currentDecisionCount for AI prompt should be 0.
+        if(chosenOptionId === null) {
             currentDecisionCount = 0; // For the AI prompt, if it's a new scenario start.
         }
     }
@@ -392,15 +392,16 @@ export async function POST(req: NextRequest) {
     console.log("----------------------------------------------------------------");
 
     let totalKcChangesForThisTurn: Array<{ kc_id: number, kc_identifier: string, change: number }> = [];
-    if (decisionIndex !== null && dialogueHistory.length > 0) {
+    if (chosenOptionId !== null && dialogueHistory.length > 0) {
         const lastAssistantResponseEntry = dialogueHistory.findLast((entry) => entry.role === 'assistant');
         if (lastAssistantResponseEntry) {
             try {
                 const previousStepData = JSON.parse(lastAssistantResponseEntry.content);
-                // Ensure decisionIndex is valid for the options array
-                const chosenOption = (typeof decisionIndex === 'number' && decisionIndex >= 0 && decisionIndex < (previousStepData.decisionPoint?.options?.length || 0))
-                    ? previousStepData.decisionPoint.options[decisionIndex]
-                    : null;
+
+                // CRITICAL CHANGE: Find the option by its stable ID, not its array index.
+                const chosenOption = previousStepData.decisionPoint?.options?.find(
+                    (opt: any) => opt.optionId === chosenOptionId
+                );
 
                 if (chosenOption?.kc_impacts?.length > 0) {
                     for (const impact of chosenOption.kc_impacts) {
@@ -413,11 +414,11 @@ export async function POST(req: NextRequest) {
                             if (kcScoreError) console.error(`Error RPC increment_user_kc_score for ${impact.kc_identifier}:`, kcScoreError);
                         } else console.warn(`KC ID for ${impact.kc_identifier} not found in map during KC impact processing.`);
                     }
-                    console.log(`[/api/lessons] Processed KC impacts for decision ${decisionIndex}:`, totalKcChangesForThisTurn);
+                    console.log(`[/api/lessons] Processed KC impacts for option with ID ${chosenOptionId}:`, totalKcChangesForThisTurn);
                 } else if (chosenOption) {
-                    console.warn(`Chosen option ${decisionIndex} had no kc_impacts or kc_impacts array was empty.`);
+                    console.warn(`Chosen option with ID ${chosenOptionId} had no kc_impacts or kc_impacts array was empty.`);
                 } else {
-                    console.warn(`Could not find chosen option for decisionIndex ${decisionIndex} in previous step data or previous step had no decision point/options.`);
+                    console.warn(`Could not find chosen option for chosenOptionId ${chosenOptionId} in previous step data.`);
                 }
             } catch (e) { console.error("Error parsing previous AI response for KC impacts:", e); }
         }
@@ -490,7 +491,7 @@ A full scenario consists of an initial narrative, followed by 3 decision points,
 Current State for this Scenario Attempt:
 - Decisions successfully made by user so far in THIS scenario: ${currentDecisionCount}
 ${previousGameState.lastDecisionIndex !== null ? `- User's previous decision index choice: ${previousGameState.lastDecisionIndex}` : ''}
-${decisionIndex !== null ? `- User has JUST chosen decision option index: ${decisionIndex} for the decision point that was presented.` : (currentDecisionCount === 0 ? '- User is starting this new scenario attempt.' : '- User is continuing the scenario.')}
+${chosenOptionId !== null ? `- User has JUST chosen decision option index: ${chosenOptionId} for the decision point that was presented.` : (currentDecisionCount === 0 ? '- User is starting this new scenario attempt.' : '- User is continuing the scenario.')}
 
 Your Task: Generate the JSON for the *next* step of the scenario. Adhere STRICTLY to the provided JSON schema.
 
@@ -535,17 +536,17 @@ Scenario Characters:
 `;
 
     // Conditional prompt adjustment for first step vs. continuation
-    if (currentDecisionCount === 0 && decisionIndex === null) {
+    if (currentDecisionCount === 0 && chosenOptionId === null) {
         systemPrompt += "\nTask: Generate the initial context, overall KCs, narrative, and the 1st decision point.";
-    } else if (decisionIndex !== null) {
+    } else if (chosenOptionId !== null) {
         const lastAssistantResponseEntry = dialogueHistory.findLast((entry) => entry.role === 'assistant');
         let chosenOptionText = '';
         if (lastAssistantResponseEntry) {
             try {
                 const previousStepData = JSON.parse(lastAssistantResponseEntry.content);
-                const chosenOption = (typeof decisionIndex === 'number' && decisionIndex >= 0 && decisionIndex < (previousStepData.decisionPoint?.options?.length || 0))
-                    ? previousStepData.decisionPoint.options[decisionIndex]
-                    : null;
+                const chosenOption = previousStepData.decisionPoint?.options?.find(
+                    (opt: any) => opt.optionId === chosenOptionId
+                );
                 if (chosenOption) {
                     chosenOptionText = `: "${chosenOption.text}"`;
                 }
@@ -553,11 +554,11 @@ Scenario Characters:
         }
 
         if (currentDecisionCount < 2) { // User made 1st (count=0) or 2nd (count=1) choice. AI generates DP2 or DP3.
-            systemPrompt += `\nTask: User chose option index ${decisionIndex}${chosenOptionText} for their ${currentDecisionCount + 1}st/nd decision. Generate narrative consequences and the NEXT decision point. \`scenarioKCsOverall\` must be [].`;
+            systemPrompt += `\nTask: User chose option index ${chosenOptionId}${chosenOptionText} for their ${currentDecisionCount + 1}st/nd decision. Generate narrative consequences and the NEXT decision point. \`scenarioKCsOverall\` must be [].`;
         } else if (currentDecisionCount === 2) { // User made 3rd choice (count=2). AI concludes.
-            systemPrompt += `\nTask: User chose option index ${decisionIndex}${chosenOptionText} for their THIRD decision. Generate concluding narrative. \`decisionPoint\` = null, \`scenarioComplete\` = true. \`scenarioKCsOverall\` must be [].`;
+            systemPrompt += `\nTask: User chose option index ${chosenOptionId}${chosenOptionText} for their THIRD decision. Generate concluding narrative. \`decisionPoint\` = null, \`scenarioComplete\` = true. \`scenarioKCsOverall\` must be [].`;
         }
-    } else if (currentDecisionCount === 3 && decisionIndex === null) {
+    } else if (currentDecisionCount === 3 && chosenOptionId === null) {
         // This case might occur if page reloads after 3rd decision but before summary. AI should provide conclusion.
         systemPrompt += `\nTask: User has completed 3 decisions. Generate concluding narrative. \`decisionPoint\` = null, \`scenarioComplete\` = true. \`scenarioKCsOverall\` must be [].`;
     }
@@ -568,21 +569,21 @@ Scenario Characters:
     const relevantHistory = dialogueHistory.slice(-4); // Last 2 user actions and 2 AI responses
     messagesForOpenAI.push(...relevantHistory);
 
-    if (decisionIndex !== null) {
+    if (chosenOptionId !== null) {
         const lastAssistantResponseEntry = dialogueHistory.findLast((entry) => entry.role === 'assistant');
         let chosenOptionText = '';
         if (lastAssistantResponseEntry) {
             try {
                 const previousStepData = JSON.parse(lastAssistantResponseEntry.content);
-                const chosenOption = (typeof decisionIndex === 'number' && decisionIndex >= 0 && decisionIndex < (previousStepData.decisionPoint?.options?.length || 0))
-                    ? previousStepData.decisionPoint.options[decisionIndex]
-                    : null;
+                const chosenOption = previousStepData.decisionPoint?.options?.find(
+                    (opt: any) => opt.optionId === chosenOptionId
+                );
                 if (chosenOption) {
                     chosenOptionText = `: "${chosenOption.text}"`;
                 }
             } catch (e) { console.error("Error parsing previous AI response for chosen option text:", e); }
         }
-        messagesForOpenAI.push({ role: "user", content: `I chose decision option index: ${decisionIndex}${chosenOptionText}. Based on the Current State (${currentDecisionCount} decisions made before this choice), what happens next?` });
+        messagesForOpenAI.push({ role: "user", content: `I chose decision option index: ${chosenOptionId}${chosenOptionText}. Based on the Current State (${currentDecisionCount} decisions made before this choice), what happens next?` });
     } else if (currentDecisionCount === 0) {
         messagesForOpenAI.push({ role: "user", content: "Start this new scenario attempt." });
     } else if (currentDecisionCount >= 3) { // Should generate conclusion
@@ -634,15 +635,23 @@ Scenario Characters:
       return NextResponse.json({ error: "Could not parse valid JSON from AI.", raw_content: content }, { status: 500 });
     }
 
+    // If the AI generated a decision point with options, add a stable ID to each
+    // option BEFORE shuffling them. This ID is the option's original index.
     if (parsedScenarioStep?.decisionPoint?.options) {
+        parsedScenarioStep.decisionPoint.options.forEach((option: any, index: number) => {
+            option.optionId = index; // Add the stable ID
+        });
+
+        // Now, shuffle the array of options that have the stable ID.
         shuffleArray(parsedScenarioStep.decisionPoint.options);
-        console.log("[/api/lessons] Successfully randomized the order of decision point options.");
+        console.log("[/api/lessons] Successfully added IDs and randomized the order of decision point options.");
     }
     
+    // This console.log will now show the shuffled options with their `optionId`
     console.log("[/api/lessons] Parsed Scenario Step from AI =>", JSON.stringify(parsedScenarioStep, null, 2));
 
     // Log Revenue to history after this turns decision
-    if (decisionIndex !== null) { // Only log if a decision was actually processed this turn
+    if (chosenOptionId !== null) { // Only log if a decision was actually processed this turn
         const revenueMetricDef = definitions.metrics.find(m => m.name === 'Revenue');
         if (revenueMetricDef) {
             const revenueSummary = metricChangesSummary.find(s => s.metricName === 'Revenue');
@@ -678,28 +687,33 @@ Scenario Characters:
     // The actual saving of granular scenario parts (scenarios, decision_points, options, kc_effects) to their dedicated tables
     // should happen when a scenario is *first* generated for an attempt.
 
-    // If it's the start of a new scenario (currentDecisionCount === 0 and decisionIndex is null)
+    // If it's the start of a new scenario (currentDecisionCount === 0 and chosenOptionId is null)
     // then we save the main scenario shell and its associated KCs.
     // Decision points and options are saved as they are generated.
 
     // For now, just update dialogue_history and progress. Granular saving is a larger task.
-    const newDialogueHistoryEntry: DialogueEntry = { role: "assistant", content };
+    const newDialogueHistoryEntry: DialogueEntry = { 
+        role: "assistant", 
+        content: JSON.stringify(parsedScenarioStep) 
+    };
+    
     const updatedDialogueHistory = [...dialogueHistory];
-    if (decisionIndex !== null) {
+    if (chosenOptionId !== null) {
         const lastAssistantResponseEntry = dialogueHistory.findLast((entry) => entry.role === 'assistant');
         let chosenOptionText = '';
         if (lastAssistantResponseEntry) {
             try {
+                // This logic is now correct because the history will contain the modified data
                 const previousStepData = JSON.parse(lastAssistantResponseEntry.content);
-                const chosenOption = (typeof decisionIndex === 'number' && decisionIndex >= 0 && decisionIndex < (previousStepData.decisionPoint?.options?.length || 0))
-                    ? previousStepData.decisionPoint.options[decisionIndex]
-                    : null;
+                const chosenOption = previousStepData.decisionPoint?.options?.find(
+                    (opt: any) => opt.optionId === chosenOptionId
+                );
                 if (chosenOption) {
                     chosenOptionText = `: "${chosenOption.text}"`;
                 }
             } catch (e) { console.error("Error parsing previous AI response for chosen option text:", e); }
         }
-        updatedDialogueHistory.push({ role: "user", content: `User chose decision index: ${decisionIndex}${chosenOptionText}` });
+        updatedDialogueHistory.push({ role: "user", content: `User chose decision index: ${chosenOptionId}${chosenOptionText}` });
     }
     updatedDialogueHistory.push(newDialogueHistoryEntry);
 
@@ -780,7 +794,7 @@ Scenario Characters:
         goalProgressValue = Math.round(conditionsProgressParts.reduce((sum, p) => sum + p, 0));
     } else {
         console.warn("No structured win conditions found for this goal. Using fallback progress.");
-        const decisionsMadeThisScenario = currentDecisionCount + (decisionIndex !== null ? 1:0);
+        const decisionsMadeThisScenario = currentDecisionCount + (chosenOptionId !== null ? 1:0);
         goalProgressValue = Math.min(95, Math.round((decisionsMadeThisScenario / 3) * 90) + 5);
     }
 
@@ -796,11 +810,11 @@ Scenario Characters:
     }
     goalProgressValue = Math.min(100, Math.max(0, goalProgressValue));
 
-    // When a new scenario starts (decisionIndex is null AND it's not the very first decision ever for this goal-user combo)
+    // When a new scenario starts (chosenOptionId is null AND it's not the very first decision ever for this goal-user combo)
     // AND it's a new attempt number, we should reset the dialogue history for THIS goal attempt in user_goals.
     // This prevents the AI from getting confused by a very long history spanning multiple full scenarios.
     let finalDialogueHistoryForDB = updatedDialogueHistory;
-    if (decisionIndex === null && scenarioAttemptNumber > completedAttemptsForCycle && completedAttemptsForCycle > 0) { // Starting a genuinely new attempt after a previous one
+    if (chosenOptionId === null && scenarioAttemptNumber > completedAttemptsForCycle && completedAttemptsForCycle > 0) { // Starting a genuinely new attempt after a previous one
       console.log(`[/api/lessons] Starting new scenario attempt ${scenarioAttemptNumber}. Clearing dialogue history for this attempt.`);
       finalDialogueHistoryForDB = [newDialogueHistoryEntry]; // Start fresh with only the AI's first message of new scenario
       console.log(`[/api/lessons] initial_metric_baselines (which is now our goal cycle baseline) will NOT be updated for this new scenario attempt.`);
@@ -858,10 +872,10 @@ Scenario Characters:
     if (upsertError) console.error("Error upserting user_goals:", upsertError);
 
     // The number of decisions effectively made in the scenario that just got a response
-    const decisionsEffectivelyMadeThisScenario = currentDecisionCount + (parsedScenarioStep.decisionPoint && decisionIndex !== null ? 1 : (decisionIndex === null && parsedScenarioStep.decisionPoint ? 0 : (decisionIndex !== null && !parsedScenarioStep.decisionPoint ? 1 : 0) ) );
+    const decisionsEffectivelyMadeThisScenario = currentDecisionCount + (parsedScenarioStep.decisionPoint && chosenOptionId !== null ? 1 : (chosenOptionId === null && parsedScenarioStep.decisionPoint ? 0 : (chosenOptionId !== null && !parsedScenarioStep.decisionPoint ? 1 : 0) ) );
 
     // This block runs only when a user has made a decision in this turn.
-    if (decisionIndex !== null) {
+    if (chosenOptionId !== null) {
         try {
             // 1. Get data about the decision the user was presented with ("the cause")
             const lastAssistantResponseEntry = dialogueHistory.findLast((entry) => entry.role === 'assistant');
@@ -875,9 +889,9 @@ Scenario Characters:
                 if (previousStepData.decisionPoint) {
                     decision_point_question = previousStepData.decisionPoint.question;
                     options_presented = previousStepData.decisionPoint.options;
-                    const chosenOption = (typeof decisionIndex === 'number' && decisionIndex >= 0 && decisionIndex < (options_presented?.length || 0))
-                        ? options_presented?.[decisionIndex]
-                        : null;
+                    const chosenOption = previousStepData.decisionPoint.options.find(
+                        (opt: any) => opt.optionId === chosenOptionId
+                    );
                     if (chosenOption) {
                         chosen_option_text = chosenOption.text;
                         kc_impacts_of_choice = chosenOption.kc_impacts;
@@ -915,7 +929,7 @@ Scenario Characters:
                 decision_number: decisionNumberForLog,
                 decision_point_question,
                 options_presented,
-                chosen_option_index: decisionIndex,
+                chosen_option_index: chosenOptionId,
                 chosen_option_text,
                 kc_impacts_of_choice,
                 kc_scores_after_decision,
