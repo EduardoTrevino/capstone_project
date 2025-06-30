@@ -144,11 +144,11 @@ export default function ScenarioSummaryScreen({
 
             let rawMetricChange = 0;
             switch (metricName) {
-              case 'Revenue': rawMetricChange = totalScore * 700; break;
-              case 'Customer Satisfaction': rawMetricChange = totalScore * 12.5; break;
-              case 'Reputation': rawMetricChange = totalScore * 0.3; break;
-              case 'Ethical Decision Making': rawMetricChange = totalScore * 2; break;
-              case 'Risk-Taking': rawMetricChange = totalScore * 2; break;
+              case 'Revenue': rawMetricChange = totalScore * 5750; break;
+              case 'Customer Satisfaction': rawMetricChange = totalScore * 6.5; break;
+              case 'Reputation': rawMetricChange = totalScore * 0.28; break;
+              case 'Ethical Decision Making': rawMetricChange = totalScore * 9.5; break;
+              case 'Risk-Taking': rawMetricChange = totalScore * 9.5; break;
               default: rawMetricChange = totalScore * 2;
             }
 
