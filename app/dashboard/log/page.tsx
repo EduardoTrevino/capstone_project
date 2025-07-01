@@ -35,15 +35,6 @@ interface DefinitionBundle {
   metricIdToName: Map<number, string>;
   metricUnits: Record<string, string>;
 }
-interface UserGoal {
-  id: number;
-  name: string;
-  description: string;
-  user_goal_id: number;
-  progress: number | null;
-  status: string;
-  dialogue_history: any;
-}
 
 // --- CONSTANTS & HELPERS ---
 const METRIC_SORT_ORDER = [
@@ -205,7 +196,6 @@ const ScenarioLogCard = ({ scenario, isExpanded, onToggle, definitions, onRedoCl
                         {isExpanded ? 'Less' : 'View Details'} {isExpanded ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
                     </button>
                 </div>
-                {/* --- ANIMATION IMPLEMENTED HERE --- */}
                 <div className={`grid transition-all duration-500 ease-in-out ${isExpanded ? 'grid-rows-[1fr] opacity-100' : 'grid-rows-[0fr] opacity-0'}`}>
                     <div className="overflow-hidden">
                         {scenario.decisions.map((decision, index) => (
@@ -229,20 +219,6 @@ const LockedScenarioCard = ({ scenarioNumber }: { scenarioNumber: number }) => (
     </div>
 );
 
-const BottomNav = ({ router, currentGoal }: { router: any, currentGoal: UserGoal | null }) => {
-  const handlePlayClick = () => { if (!currentGoal) { alert("Please select a goal first!"); return; } router.push("/dashboard/game"); };
-  return (
-    <nav className="fixed bottom-0 inset-x-0 z-50">
-      <div className="relative h-[95px] bg-white rounded-t-[32px] flex items-center justify-around px-6">
-        <button onClick={() => router.push("/dashboard")} className="hover:scale-110 transition"><Image src="/assets/Navbar/Navbar_Personal Icons/Navbar_Personal Icons_Clicked/Navbar_Personal Icons_Clicked.png" alt="home" width={48} height={48} /></button>
-        <div className="relative -top-5">
-          <button onClick={handlePlayClick} className="w-[100px] h-[100px] bg-white rounded-full border-8 border-white flex items-center justify-center hover:scale-110 transition"><Image src="/assets/Navbar/Navbar_GameButton/Navbar_GameButton.png" alt="game" fill style={{ objectFit: "contain" }} /></button>
-        </div>
-        <button onClick={() => router.push("/dashboard/growth")} className="hover:scale-110 transition"><Image src="/assets/Navbar/Navbar_Business Icons/Navbar_Business Icons_Clicked/Navbar_Business Icons_Clicked.png" alt="biz" width={48} height={48} /></button>
-      </div>
-    </nav>
-  );
-};
 
 // --- MAIN PAGE COMPONENT ---
 export default function LogPage() {
@@ -297,7 +273,7 @@ export default function LogPage() {
     }
     
     return (
-        <div className="min-h-screen w-full overflow-x-hidden overflow-y-auto pb-[120px]" style={{ background: "url('/assets/Background/PNG/Fixed Background.png') center/cover fixed" }}>
+        <div className="min-h-screen w-full overflow-x-hidden" style={{ background: "url('/assets/Background/PNG/Fixed Background.png') center/cover fixed" }}>
             {showRedoPopup && <RedoPopup onClose={() => setShowRedoPopup(false)} />}
             
             <header className="p-4">
@@ -308,7 +284,7 @@ export default function LogPage() {
                 </div>
             </header>
 
-            <main className="pt-4 px-4 max-w-md mx-auto">
+            <main className="pt-4 px-4 pb-8 max-w-md mx-auto">
                 {error && (<div className="text-center p-6 bg-red-100 border border-red-400 text-red-700 rounded-lg"><p className="font-bold">Oops!</p><p>{error}</p></div>)}
                 {!error && (
                     <>
@@ -325,8 +301,6 @@ export default function LogPage() {
                     </>
                 )}
             </main>
-            
-            <BottomNav router={router} currentGoal={null} />
         </div>
     );
 }
