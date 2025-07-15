@@ -7,12 +7,9 @@ import {
   DialogContent,
   DialogHeader,
   DialogTitle,
-  DialogFooter,
-  DialogClose,
 } from "@/components/ui/dialog";
-import { Button } from "@/components/ui/button";
 import { supabase } from "@/lib/supabase";
-import { Loader2, ChevronDown } from "lucide-react"; // Import ChevronDown for the dropdown arrow
+import { Loader2, ChevronDown } from "lucide-react"; // For loading and dropdown arrow
 
 interface Goal {
   id: number;
@@ -33,34 +30,35 @@ interface GoalDialogProps {
   onGoalSelect: (goal: UserGoal) => void;
 }
 
-// New component for individual, collapsible goal items
+// A self-contained, collapsible goal item component
 const GoalItem = ({ goal, onSelect }: { goal: UserGoal; onSelect: (goal: UserGoal) => void; }) => {
   const [isOpen, setIsOpen] = useState(false);
 
+  // This handler stops the click from bubbling up to the parent div
+  // so that clicking the arrow only toggles the description.
+  const handleToggleDescription = (e: React.MouseEvent) => {
+    e.stopPropagation(); // Prevents the onSelect event from firing
+    setIsOpen(!isOpen);
+  };
+
   return (
-    <div className="bg-black/40 p-4 rounded-lg border border-amber-600/50 shadow-md transition-colors">
-      {/* Clickable header to toggle the description */}
-      <div
-        className="flex justify-between items-center cursor-pointer"
-        onClick={() => setIsOpen(!isOpen)}
-      >
+    <div
+      key={goal.id}
+      className="bg-black/40 p-4 rounded-lg border border-amber-600/50 shadow-md hover:bg-black/60 hover:border-amber-500 transition-colors cursor-pointer"
+      onClick={() => onSelect(goal)} // Select the goal when the item is clicked
+    >
+      <div className="flex justify-between items-center">
         <h3 className="text-lg font-semibold text-amber-100 font-dashboard">{goal.name}</h3>
         <ChevronDown
           className={`h-6 w-6 text-amber-100 transform transition-transform duration-200 ${isOpen ? 'rotate-180' : ''}`}
+          onClick={handleToggleDescription} // Arrow click is handled separately
         />
       </div>
 
-      {/* Collapsible content */}
+      {/* Collapsible content area */}
       {isOpen && (
         <div className="mt-4 pt-4 border-t border-amber-600/30">
-          <p className="text-sm text-gray-300 mb-4">{goal.description || "No description available."}</p>
-          <Button
-            onClick={() => onSelect(goal)}
-            style={{ backgroundColor: '#2F6B3B', color: '#FEECCF' }}
-            className="w-full font-bold transition-opacity hover:opacity-90"
-          >
-            Select Goal
-          </Button>
+          <p className="text-sm text-gray-300">{goal.description || "No description available."}</p>
         </div>
       )}
     </div>
@@ -85,7 +83,6 @@ export default function GoalDialog({ userId, onClose, onGoalSelect }: GoalDialog
       setError(null);
 
       try {
-        // Fetch all goal definitions
         const { data: goalsData, error: goalsError } = await supabase
           .from("goals")
           .select("id, name, description");
@@ -93,7 +90,6 @@ export default function GoalDialog({ userId, onClose, onGoalSelect }: GoalDialog
         if (goalsError) throw goalsError;
         if (!goalsData) throw new Error("No goals found.");
 
-        // Fetch user's progress (simplified for this context)
         const { data: userGoalsData, error: userGoalsError } = await supabase
           .from("user_goals")
           .select("id, goal_id, progress, dialogue_history")
@@ -101,7 +97,6 @@ export default function GoalDialog({ userId, onClose, onGoalSelect }: GoalDialog
 
         if (userGoalsError) throw userGoalsError;
 
-        // Combine the data
         const combinedGoals: UserGoal[] = goalsData.map((goal) => {
           const userGoal = userGoalsData?.find((ug) => ug.goal_id === goal.id);
           return {
@@ -133,18 +128,17 @@ export default function GoalDialog({ userId, onClose, onGoalSelect }: GoalDialog
   return (
     <Dialog open onOpenChange={(open) => { if (!open) onClose(); }}>
       <DialogContent
-        className="sm:max-w-[700px] max-h-[80vh] overflow-y-auto"
+        // This Tailwind arbitrary variant hides the default 'X' close button
+        className="sm:max-w-[700px] max-h-[80vh] overflow-y-auto [&>button]:hidden"
         style={{
-          // Use the new background image path
           backgroundImage: 'url("/assets/Goals/Goals_BG/Goals_BG.png")',
           backgroundSize: "cover",
-          border: "4px solid #FCD34D",
-          color: "#FEECCF", // Set default text color
+          color: "#FEECCF",
+          // The border has been removed
         }}
         onInteractOutside={(e) => e.preventDefault()}
       >
         <DialogHeader>
-          {/* Updated and centered title */}
           <DialogTitle className="text-white font-dashboard text-2xl text-center">
             You can change your goal whenever you want
           </DialogTitle>
@@ -161,23 +155,13 @@ export default function GoalDialog({ userId, onClose, onGoalSelect }: GoalDialog
           ) : userGoals.length === 0 ? (
             <p className="text-gray-300 font-dashboard text-center">No goals available yet.</p>
           ) : (
-            // Map over goals and render the new GoalItem component
             userGoals.map((goal) => (
               <GoalItem key={goal.id} goal={goal} onSelect={handleSelectGoal} />
             ))
           )}
         </div>
 
-        <DialogFooter className="mt-4">
-          <DialogClose asChild>
-            <Button
-              variant="outline"
-              className="px-4 py-2 border-2 border-amber-700 rounded shadow-lg bg-amber-900/80 text-white font-bold hover:bg-amber-800 active:bg-orange-500 transition-colors font-dashboard"
-            >
-              Close
-            </Button>
-          </DialogClose>
-        </DialogFooter>
+        {/* The DialogFooter and its Close button have been completely removed */}
       </DialogContent>
     </Dialog>
   );
