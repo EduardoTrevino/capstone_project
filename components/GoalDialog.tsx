@@ -1,15 +1,16 @@
-// components/GoalDialog.tsx
 "use client"
 
 import { useState, useEffect } from "react";
+import Image from 'next/image'; // Import the Next.js Image component
 import {
   Dialog,
   DialogContent,
   DialogHeader,
   DialogTitle,
+  DialogOverlay,
 } from "@/components/ui/dialog";
 import { supabase } from "@/lib/supabase";
-import { Loader2, ChevronDown } from "lucide-react";
+import { Loader2, ChevronDown, ArrowLeft } from "lucide-react";
 
 // ... (interfaces Goal, UserGoal, GoalDialogProps remain the same) ...
 interface Goal {
@@ -105,48 +106,68 @@ export default function GoalDialog({ userId, onClose, onGoalSelect }: GoalDialog
   };
 
   return (
-    <Dialog open onOpenChange={(open) => { if (!open) onClose(); }}>
-      <DialogContent
-        className="w-[90%] sm:max-w-[700px] max-h-[80vh] p-0 rounded-lg [&>button]:hidden"
-        style={{
-          backgroundImage: 'url("/assets/Goals/Goals_BG/Goals_BG.png")',
-          backgroundSize: "cover",
-          backgroundPosition: "center", // Helps center the image
-          color: "#FEECCF",
-          border: "none",
-          overflow: "hidden", // This is key to clipping the background to the rounded corners
-        }}
-        onInteractOutside={(e) => e.preventDefault()}
+    <>
+      {/* Back button is now larger */}
+      <button
+        onClick={onClose}
+        className="fixed top-5 left-4 z-[100] flex h-12 w-12 items-center justify-center rounded-full bg-[#FFC709] transition-transform hover:scale-110 focus:outline-none focus:ring-2 focus:ring-white focus:ring-offset-2 focus:ring-offset-gray-800"
+        aria-label="Go back"
       >
-        {/* We wrap everything in a flex column to control layout */}
-        <div className="flex flex-col h-full">
-            <div className="p-6 pb-2"> {/* Add padding back to the header area */}
-                <DialogHeader>
-                    <DialogTitle className="text-white font-dashboard text-2xl text-center">
-                        You can change your goal whenever you want
-                    </DialogTitle>
-                </DialogHeader>
-            </div>
+        <ArrowLeft className="h-7 w-7 text-white" />
+      </button>
 
-            {/* This inner div is now responsible for scrolling */}
-            <div className="flex-1 p-6 pt-4 space-y-4 overflow-y-auto">
-                {isLoading ? (
-                    <div className="flex justify-center items-center h-40">
-                    <Loader2 className="h-8 w-8 animate-spin text-white" />
-                    <p className="ml-2 font-dashboard">Loading Goals...</p>
-                    </div>
-                ) : error ? (
-                    <p className="text-red-400 font-dashboard text-center">{error}</p>
-                ) : userGoals.length === 0 ? (
-                    <p className="text-gray-300 font-dashboard text-center">No goals available yet.</p>
-                ) : (
-                    userGoals.map((goal) => (
-                    <GoalItem key={goal.id} goal={goal} onSelect={handleSelectGoal} />
-                    ))
-                )}
-            </div>
-        </div>
-      </DialogContent>
-    </Dialog>
+      {/* Title image asset is now used instead of the text container */}
+      <div className="fixed top-6 left-1/2 -translate-x-1/2 z-[100] pointer-events-none">
+        <Image 
+          src="/assets/Goals/select_a_goal.png" 
+          alt="Select a Goal" 
+          width={250} // Adjust width as needed
+          height={50}  // Adjust height as needed
+          priority
+        />
+      </div>
+
+      <Dialog open onOpenChange={(open) => { if (!open) onClose(); }}>
+        <DialogOverlay className="bg-black/30 backdrop-blur-sm" />
+        <DialogContent
+          className="w-[90%] sm:max-w-[700px] max-h-[80vh] p-0 rounded-lg [&>button]:hidden"
+          style={{
+            backgroundImage: 'url("/assets/Goals/Goals_BG/Goals_BG.png")',
+            backgroundSize: "cover",
+            backgroundPosition: "center",
+            color: "#FEECCF",
+            border: "none",
+            overflow: "hidden",
+          }}
+        >
+          <div className="flex flex-col h-full">
+              <div className="p-6 pb-2"> {/* Added more top padding to make space for the fixed title */}
+                  <DialogHeader>
+                      <DialogTitle className="text-white font-dashboard text-2xl text-center">
+                          You can change your goal whenever you want
+                      </DialogTitle>
+                  </DialogHeader>
+              </div>
+
+              <div className="flex-1 p-6 pt-4 space-y-4 overflow-y-auto">
+                  {isLoading ? (
+                      <div className="flex justify-center items-center h-40">
+                      <Loader2 className="h-8 w-8 animate-spin text-white" />
+                      <p className="ml-2 font-dashboard">Loading Goals...</p>
+                      </div>
+                  ) : error ? (
+                      <p className="text-red-400 font-dashboard text-center">{error}</p>
+                  ) : userGoals.length === 0 ? (
+                      <p className="text-gray-300 font-dashboard text-center">No goals available yet.</p>
+                  ) : (
+                      userGoals.map((goal) => (
+                      <GoalItem key={goal.id} goal={goal} onSelect={handleSelectGoal} />
+                      ))
+                  )}
+              </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+    </>
   );
 }
