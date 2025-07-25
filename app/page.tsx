@@ -91,6 +91,7 @@ export default function Home() {
       .eq("name", username)
       .single()
 
+    // Handle new user creation
     if (error) {
       console.log("User not found, creating new user...")
       const { data: newUser, error: createError } = await supabase
@@ -109,18 +110,26 @@ export default function Home() {
       }
       localStorage.setItem("username", newUser.name)
       localStorage.setItem("userId", newUser.id)
-      router.push("/intro/1")
+      // router.push("/intro/1") // Old code
+      router.push("/dashboard")  // New code: push directly to dashboard
       return
     }
 
+    // Handle existing user login
     localStorage.setItem("username", existingUser.name)
     localStorage.setItem("userId", existingUser.id)
 
-    if (existingUser.intro_done) {
-      router.push("/dashboard/")
-    } else {
-      router.push("/intro/1")
-    }
+    // --- MODIFICATION START ---
+    // Comment out the old logic that checked for intro_done
+    // if (existingUser.intro_done) {
+    //   router.push("/dashboard/")
+    // } else {
+    //   router.push("/intro/1")
+    // }
+
+    // Always push to the dashboard regardless of intro status
+    router.push("/dashboard")
+    // --- MODIFICATION END ---
   }
 
   return (
