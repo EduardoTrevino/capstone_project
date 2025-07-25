@@ -84,8 +84,8 @@ The application's backend is powered by Supabase.
 
 1.  **Clone the Repository:**
     ```bash
-    git clone <your-repository-url>
-    cd <repository-directory>
+    git clone https://github.com/EduardoTrevino/capstone_project.git
+    cd capstone_project
     ```
 
 2.  **Install Dependencies:**
