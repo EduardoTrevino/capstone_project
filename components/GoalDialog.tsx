@@ -1,7 +1,7 @@
 "use client"
 
 import { useState, useEffect } from "react";
-import Image from 'next/image'; // Import the Next.js Image component
+import Image from 'next/image';
 import {
   Dialog,
   DialogContent,
@@ -12,7 +12,7 @@ import {
 import { supabase } from "@/lib/supabase";
 import { Loader2, ChevronDown, ArrowLeft } from "lucide-react";
 
-// ... (interfaces Goal, UserGoal, GoalDialogProps remain the same) ...
+// Interfaces
 interface Goal {
   id: number;
   name: string;
@@ -32,12 +32,12 @@ interface GoalDialogProps {
   onGoalSelect: (goal: UserGoal) => void;
 }
 
-// GoalItem component remains the same
+// GoalItem sub-component (remains the same)
 const GoalItem = ({ goal, onSelect }: { goal: UserGoal; onSelect: (goal: UserGoal) => void; }) => {
   const [isOpen, setIsOpen] = useState(false);
 
   const handleToggleDescription = (e: React.MouseEvent) => {
-    e.stopPropagation();
+    e.stopPropagation(); // Prevent the main onClick from firing when toggling description
     setIsOpen(!isOpen);
   };
 
@@ -63,7 +63,6 @@ const GoalItem = ({ goal, onSelect }: { goal: UserGoal; onSelect: (goal: UserGoa
   );
 };
 
-
 export default function GoalDialog({ userId, onClose, onGoalSelect }: GoalDialogProps) {
   const [userGoals, setUserGoals] = useState<UserGoal[]>([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -71,25 +70,79 @@ export default function GoalDialog({ userId, onClose, onGoalSelect }: GoalDialog
 
   useEffect(() => {
     const fetchGoalsAndProgress = async () => {
-      // ... (fetch logic remains the same) ...
       if (!userId) {
         setError("User ID is missing.");
         setIsLoading(false);
         return;
       }
+
       setIsLoading(true);
       setError(null);
+
       try {
-        const { data: goalsData, error: goalsError } = await supabase.from("goals").select("id, name, description");
+        // 1. Fetch all goal definitions
+        const { data: goalsData, error: goalsError } = await supabase
+          .from("goals")
+          .select("id, name, description");
+
         if (goalsError) throw goalsError;
         if (!goalsData) throw new Error("No goals found.");
-        const { data: userGoalsData, error: userGoalsError } = await supabase.from("user_goals").select("id, goal_id, progress, dialogue_history").eq("user_id", userId);
+
+        // 2. Fetch user's progress for these goals
+        const goalIds = goalsData.map((g) => g.id);
+        const { data: userGoalsData, error: userGoalsError } = await supabase
+          .from("user_goals")
+          .select("id, goal_id, progress, dialogue_history")
+          .eq("user_id", userId)
+          .in("goal_id", goalIds);
+
         if (userGoalsError) throw userGoalsError;
+
+        // 3. Combine the data
         const combinedGoals: UserGoal[] = goalsData.map((goal) => {
           const userGoal = userGoalsData?.find((ug) => ug.goal_id === goal.id);
-          return { ...goal, user_goal_id: userGoal?.id || null, progress: userGoal?.progress || 0, dialogue_history: userGoal?.dialogue_history || null };
+          return {
+            ...goal,
+            user_goal_id: userGoal?.id || null,
+            progress: userGoal?.progress || 0,
+            dialogue_history: userGoal?.dialogue_history || null,
+          };
         });
+
+        // 4. FIX: Restore the logic to create missing user_goals entries
+        const missingGoalIds = goalIds.filter(gid => !userGoalsData?.some(ug => ug.goal_id === gid));
+        if (missingGoalIds.length > 0) {
+            const newEntries = missingGoalIds.map(goal_id => ({
+                user_id: userId,
+                goal_id: goal_id,
+                progress: 0,
+                dialogue_history: null
+            }));
+
+            const { error: upsertError } = await supabase
+                .from('user_goals')
+                .upsert(newEntries, { onConflict: 'user_id, goal_id', ignoreDuplicates: true });
+
+            if (upsertError) {
+                console.error("Error upserting missing user goals:", upsertError);
+            } else {
+                 // Merge defaults into the combinedGoals for immediate display
+                 missingGoalIds.forEach(missingId => {
+                    const goalDef = goalsData.find(g => g.id === missingId);
+                    if (goalDef && !combinedGoals.some(cg => cg.id === missingId)) {
+                        combinedGoals.push({
+                            ...goalDef,
+                            user_goal_id: null,
+                            progress: 0,
+                            dialogue_history: null
+                        });
+                    }
+                 });
+            }
+        }
+
         setUserGoals(combinedGoals);
+
       } catch (err: any) {
         console.error("Error fetching goals:", err);
         setError(`Failed to load goals: ${err.message}`);
@@ -97,17 +150,21 @@ export default function GoalDialog({ userId, onClose, onGoalSelect }: GoalDialog
         setIsLoading(false);
       }
     };
+
     fetchGoalsAndProgress();
   }, [userId]);
 
   const handleSelectGoal = (goal: UserGoal) => {
     console.log("GoalDialog: Selected goal:", goal.name);
     onGoalSelect(goal);
+    // FIX: Explicitly call onClose after a goal is selected
+    // This ensures the dialog closes, which is the expected behavior.
+    onClose();
   };
 
   return (
     <>
-      {/* Back button is now larger */}
+      {/* Back button remains the same */}
       <button
         onClick={onClose}
         className="fixed top-5 left-4 z-[100] flex h-12 w-12 items-center justify-center rounded-full bg-[#FFC709] transition-transform hover:scale-110 focus:outline-none focus:ring-2 focus:ring-white focus:ring-offset-2 focus:ring-offset-gray-800"
@@ -116,13 +173,13 @@ export default function GoalDialog({ userId, onClose, onGoalSelect }: GoalDialog
         <ArrowLeft className="h-7 w-7 text-white" />
       </button>
 
-      {/* Title image asset is now used instead of the text container */}
+      {/* Title image asset remains the same */}
       <div className="fixed top-6 left-1/2 -translate-x-1/2 z-[100] pointer-events-none">
         <Image 
           src="/assets/Goals/select_a_goal.png" 
           alt="Select a Goal" 
-          width={250} // Adjust width as needed
-          height={50}  // Adjust height as needed
+          width={250}
+          height={50}
           priority
         />
       </div>
@@ -141,7 +198,7 @@ export default function GoalDialog({ userId, onClose, onGoalSelect }: GoalDialog
           }}
         >
           <div className="flex flex-col h-full">
-              <div className="p-6 pb-2"> {/* Added more top padding to make space for the fixed title */}
+              <div className="p-6 pb-2">
                   <DialogHeader>
                       <DialogTitle className="text-white font-dashboard text-2xl text-center">
                           You can change your goal whenever you want
